@@ -41,7 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize the queue
     let queue = BroccoliQueue::builder("redis://localhost:6379")
         .pool_connections(5) // Optional: Number of connections to pool
-        .failed_message_retry_strategys(Default::default()) // Optional: Retry strategy (max retries, etc)
+        .failed_message_retry_strategy(Default::default()) // Optional: Retry strategy (max retries, etc)
         .build()
         .await?;
 
