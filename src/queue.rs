@@ -1,7 +1,13 @@
 use std::{future::Future, sync::Arc, time::Instant};
 
 use futures::stream::FuturesUnordered;
-use time::{Duration, OffsetDateTime};
+use time::Duration;
+
+#[cfg(any(
+    feature = "redis",
+    all(feature = "rabbitmq", feature = "rabbitmq-delay")
+))]
+use time::OffsetDateTime;
 
 use crate::{
     brokers::{
@@ -148,13 +154,69 @@ impl BroccoliQueueBuilder {
     }
 }
 
+/// Options for consuming messages from the broker.
+#[derive(Debug, Clone)]
+pub struct ConsumeOptions {
+    /// Whether to auto-acknowledge messages. Default is false. If you try to acknowledge or reject a message that has been auto-acknowledged, it will result in an error.
+    pub auto_ack: Option<bool>,
+}
+
+impl Default for ConsumeOptions {
+    fn default() -> Self {
+        Self {
+            auto_ack: Some(false),
+        }
+    }
+}
+
+impl ConsumeOptions {
+    /// Creates a new ConsumeOptionsBuilder.
+    pub fn builder() -> ConsumeOptionsBuilder {
+        ConsumeOptionsBuilder::new()
+    }
+}
+
+/// Builder for constructing ConsumeOptions with a fluent interface.
+#[derive(Default, Debug)]
+pub struct ConsumeOptionsBuilder {
+    auto_ack: Option<bool>,
+}
+
+impl ConsumeOptionsBuilder {
+    /// Creates a new ConsumeOptionsBuilder with default values.
+    pub fn new() -> Self {
+        Self { auto_ack: None }
+    }
+
+    /// Sets whether messages should be auto-acknowledged.
+    pub fn auto_ack(mut self, auto_ack: bool) -> Self {
+        self.auto_ack = Some(auto_ack);
+        self
+    }
+
+    /// Builds the ConsumeOptions with the configured values.
+    pub fn build(self) -> ConsumeOptions {
+        ConsumeOptions {
+            auto_ack: self.auto_ack,
+        }
+    }
+}
+
 /// Options for publishing messages to the broker.
 #[derive(Debug, Default)]
 pub struct PublishOptions {
     /// Time-to-live for the message
     pub ttl: Option<Duration>,
+    #[cfg(any(
+        feature = "redis",
+        all(feature = "rabbitmq", feature = "rabbitmq-delay")
+    ))]
     /// Delay before the message is published
     pub delay: Option<Duration>,
+    #[cfg(any(
+        feature = "redis",
+        all(feature = "rabbitmq", feature = "rabbitmq-delay")
+    ))]
     /// Scheduled time for the message to be published
     pub scheduled_at: Option<OffsetDateTime>,
 }
@@ -170,7 +232,15 @@ impl PublishOptions {
 #[derive(Default, Debug)]
 pub struct PublishOptionsBuilder {
     ttl: Option<Duration>,
+    #[cfg(any(
+        feature = "redis",
+        all(feature = "rabbitmq", feature = "rabbitmq-delay")
+    ))]
     delay: Option<Duration>,
+    #[cfg(any(
+        feature = "redis",
+        all(feature = "rabbitmq", feature = "rabbitmq-delay")
+    ))]
     scheduled_at: Option<OffsetDateTime>,
 }
 
@@ -179,7 +249,15 @@ impl PublishOptionsBuilder {
     pub fn new() -> Self {
         Self {
             ttl: None,
+            #[cfg(any(
+                feature = "redis",
+                all(feature = "rabbitmq", feature = "rabbitmq-delay")
+            ))]
             delay: None,
+            #[cfg(any(
+                feature = "redis",
+                all(feature = "rabbitmq", feature = "rabbitmq-delay")
+            ))]
             scheduled_at: None,
         }
     }
@@ -191,12 +269,20 @@ impl PublishOptionsBuilder {
     }
 
     /// Sets a delay before the message is published.
+    #[cfg(any(
+        feature = "redis",
+        all(feature = "rabbitmq", feature = "rabbitmq-delay")
+    ))]
     pub fn delay(mut self, duration: Duration) -> Self {
         self.delay = Some(duration);
         self
     }
 
     /// Sets a specific time for the message to be published.
+    #[cfg(any(
+        feature = "redis",
+        all(feature = "rabbitmq", feature = "rabbitmq-delay")
+    ))]
     pub fn schedule_at(mut self, time: OffsetDateTime) -> Self {
         self.scheduled_at = Some(time);
         self
@@ -206,7 +292,15 @@ impl PublishOptionsBuilder {
     pub fn build(self) -> PublishOptions {
         PublishOptions {
             ttl: self.ttl,
+            #[cfg(any(
+                feature = "redis",
+                all(feature = "rabbitmq", feature = "rabbitmq-delay")
+            ))]
             delay: self.delay,
+            #[cfg(any(
+                feature = "redis",
+                all(feature = "rabbitmq", feature = "rabbitmq-delay")
+            ))]
             scheduled_at: self.scheduled_at,
         }
     }
@@ -316,9 +410,10 @@ impl BroccoliQueue {
     pub async fn consume<T: Clone + serde::Serialize + serde::de::DeserializeOwned>(
         &self,
         topic: &str,
+        options: Option<ConsumeOptions>,
     ) -> Result<BrokerMessage<T>, BroccoliError> {
         let message =
-            self.broker.consume(topic).await.map_err(|e| {
+            self.broker.consume(topic, options).await.map_err(|e| {
                 BroccoliError::Consume(format!("Failed to consume message: {:?}", e))
             })?;
 
@@ -341,12 +436,13 @@ impl BroccoliQueue {
         topic: &str,
         batch_size: usize,
         timeout: Duration,
+        options: Option<ConsumeOptions>,
     ) -> Result<Vec<BrokerMessage<T>>, BroccoliError> {
         let mut messages = Vec::with_capacity(batch_size);
         let deadline = Instant::now() + timeout;
 
         while messages.len() < batch_size && Instant::now() < deadline {
-            if let Ok(Some(msg)) = self.try_consume::<T>(topic).await {
+            if let Ok(Some(msg)) = self.try_consume::<T>(topic, options.clone()).await {
                 messages.push(msg);
             }
         }
@@ -366,9 +462,10 @@ impl BroccoliQueue {
     pub async fn try_consume<T: Clone + serde::Serialize + serde::de::DeserializeOwned>(
         &self,
         topic: &str,
+        options: Option<ConsumeOptions>,
     ) -> Result<Option<BrokerMessage<T>>, BroccoliError> {
         let serialized_message =
-            self.broker.try_consume(topic).await.map_err(|e| {
+            self.broker.try_consume(topic, options).await.map_err(|e| {
                 BroccoliError::Consume(format!("Failed to consume message: {:?}", e))
             })?;
 
@@ -525,9 +622,13 @@ impl BroccoliQueue {
 
                     let handle = tokio::spawn(async move {
                         loop {
-                            let message = broker.consume(&topic).await.map_err(|e| {
-                                log::error!("Failed to consume message: {:?}", e);
-                            });
+                            let message =
+                                broker
+                                    .consume(&topic, Default::default())
+                                    .await
+                                    .map_err(|e| {
+                                        log::error!("Failed to consume message: {:?}", e);
+                                    });
 
                             if let Ok(message) = message {
                                 let broker_message = if let Ok(msg) = message.into_message() {
@@ -565,10 +666,14 @@ impl BroccoliQueue {
                     handles.push(handle);
                 }
             } else {
-                let message = self.broker.consume(topic).await.map_err(|e| {
-                    log::error!("Failed to consume message: {:?}", e);
-                    BroccoliError::Consume(format!("Failed to consume message: {:?}", e))
-                })?;
+                let message = self
+                    .broker
+                    .consume(topic, Default::default())
+                    .await
+                    .map_err(|e| {
+                        log::error!("Failed to consume message: {:?}", e);
+                        BroccoliError::Consume(format!("Failed to consume message: {:?}", e))
+                    })?;
 
                 match handler(message.into_message()?).await {
                     Ok(_) => {
@@ -679,9 +784,13 @@ impl BroccoliQueue {
 
                     let handle = tokio::spawn(async move {
                         loop {
-                            let message = broker.consume(&topic).await.map_err(|e| {
-                                log::error!("Failed to consume message: {:?}", e);
-                            });
+                            let message =
+                                broker
+                                    .consume(&topic, Default::default())
+                                    .await
+                                    .map_err(|e| {
+                                        log::error!("Failed to consume message: {:?}", e);
+                                    });
 
                             if let Ok(message) = message {
                                 let broker_message = if let Ok(msg) = message.into_message() {
@@ -726,10 +835,14 @@ impl BroccoliQueue {
                     handles.push(handle);
                 }
             } else {
-                let message = self.broker.consume(topic).await.map_err(|e| {
-                    log::error!("Failed to consume message: {:?}", e);
-                    BroccoliError::Consume(format!("Failed to consume message: {:?}", e))
-                })?;
+                let message = self
+                    .broker
+                    .consume(topic, Default::default())
+                    .await
+                    .map_err(|e| {
+                        log::error!("Failed to consume message: {:?}", e);
+                        BroccoliError::Consume(format!("Failed to consume message: {:?}", e))
+                    })?;
 
                 match message_handler(message.into_message()?).await {
                     Ok(_) => {

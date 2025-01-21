@@ -39,8 +39,13 @@ async fn error_handler(msg: JobPayload, err: BroccoliError) -> Result<(), Brocco
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
+    #[cfg(feature = "redis")]
+    let queue_url = "redis://localhost:6379";
+    #[cfg(feature = "rabbitmq")]
+    let queue_url = "amqp://localhost:5672";
+
     // Initialize the queue
-    let queue = BroccoliQueue::builder("redis://localhost:6379")
+    let queue = BroccoliQueue::builder(queue_url)
         .pool_connections(5)
         .failed_message_retry_strategy(Default::default())
         .build()

@@ -1,0 +1,23 @@
+FROM rabbitmq:4.0-management
+
+# Install wget if not present
+USER root
+RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/*
+
+# Download and install the delayed message exchange plugin
+RUN wget https://github.com/rabbitmq/rabbitmq-delayed-message-exchange/releases/download/v4.0.2/rabbitmq_delayed_message_exchange-4.0.2.ez \
+    -O /opt/rabbitmq/plugins/rabbitmq_delayed_message_exchange-4.0.2.ez
+
+# Set proper permissions
+RUN chown rabbitmq:rabbitmq /opt/rabbitmq/plugins/rabbitmq_delayed_message_exchange-4.0.2.ez && \
+    chmod 644 /opt/rabbitmq/plugins/rabbitmq_delayed_message_exchange-4.0.2.ez
+
+# Enable the plugin
+RUN rabbitmq-plugins enable rabbitmq_delayed_message_exchange
+
+# Set proper permissions for cookie file
+RUN mkdir -p /var/lib/rabbitmq && \
+    chown -R rabbitmq:rabbitmq /var/lib/rabbitmq && \
+    chmod 700 /var/lib/rabbitmq
+
+USER rabbitmq

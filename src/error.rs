@@ -68,6 +68,7 @@ pub enum BroccoliError {
     /// Represents Redis-specific errors.
     ///
     /// This variant wraps the underlying Redis error.
+    #[cfg(feature = "redis")]
     #[error("Redis error: {0}")]
     Redis(#[from] redis::RedisError),
 
@@ -83,4 +84,11 @@ pub enum BroccoliError {
     /// * `0` - The number of retry attempts that were made before timing out
     #[error("Connection timeout after {0} retries")]
     ConnectionTimeout(u32),
+
+    /// Represents errors that occur when a feature is not implemented.
+    ///
+    /// # Examples
+    /// - Getting the position of a message for RabbitMQ
+    #[error("Feature not implemented")]
+    NotImplemented,
 }

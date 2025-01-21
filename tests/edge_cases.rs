@@ -29,7 +29,10 @@ async fn test_empty_payload() {
     let result = queue.publish(test_topic, &empty_message, None).await;
     assert!(result.is_ok());
 
-    let consumed = queue.consume::<TestMessage>(test_topic).await.unwrap();
+    let consumed = queue
+        .consume::<TestMessage>(test_topic, Default::default())
+        .await
+        .unwrap();
     assert_eq!(consumed.payload, empty_message);
 }
 
@@ -47,7 +50,10 @@ async fn test_very_large_payload() {
     let result = queue.publish(test_topic, &large_message, None).await;
     assert!(result.is_ok());
 
-    let consumed = queue.consume::<TestMessage>(test_topic).await.unwrap();
+    let consumed = queue
+        .consume::<TestMessage>(test_topic, Default::default())
+        .await
+        .unwrap();
     assert_eq!(consumed.payload.content.len(), large_content.len());
 }
 
@@ -75,7 +81,15 @@ async fn test_concurrent_consume() {
         let queue_clone = queue.clone();
         let topic = test_topic.to_string();
         handles.push(tokio::spawn(async move {
-            queue_clone.consume::<TestMessage>(&topic).await.unwrap()
+            let msg = queue_clone
+                .consume::<TestMessage>(&topic, Default::default())
+                .await
+                .unwrap();
+            queue_clone
+                .acknowledge(test_topic, msg.clone())
+                .await
+                .unwrap();
+            msg
         }));
     }
 
@@ -107,11 +121,15 @@ async fn test_zero_ttl() {
         .unwrap();
 
     // Message should not be available
-    let result = queue.try_consume::<TestMessage>(test_topic).await.unwrap();
+    let result = queue
+        .try_consume::<TestMessage>(test_topic, Default::default())
+        .await
+        .unwrap();
     assert!(result.is_none());
 }
 
 #[tokio::test]
+#[cfg(any(feature = "redis", feature = "rabbitmq-delay"))]
 async fn test_message_ordering() {
     let queue = common::setup_queue().await;
     let test_topic = "test_ordering_topic";
@@ -154,13 +172,25 @@ async fn test_message_ordering() {
     }
 
     // Consume messages
-    let third = queue.consume::<TestMessage>(test_topic).await.unwrap();
+    let third = queue
+        .consume::<TestMessage>(test_topic, Default::default())
+        .await
+        .unwrap();
+    queue.acknowledge(test_topic, third.clone()).await.unwrap();
     assert_eq!(third.payload.id, "3");
 
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-    let second = queue.consume::<TestMessage>(test_topic).await.unwrap();
-    let first = queue.consume::<TestMessage>(test_topic).await.unwrap();
+    let second = queue
+        .consume::<TestMessage>(test_topic, Default::default())
+        .await
+        .unwrap();
+    queue.acknowledge(test_topic, second.clone()).await.unwrap();
+    let first = queue
+        .consume::<TestMessage>(test_topic, Default::default())
+        .await
+        .unwrap();
+    queue.acknowledge(test_topic, first.clone()).await.unwrap();
 
     assert_eq!(second.payload.id, "2");
     assert_eq!(first.payload.id, "1");

@@ -1,11 +1,12 @@
 use broccoli_queue::queue::BroccoliQueue;
 
 pub async fn setup_queue() -> BroccoliQueue {
-    BroccoliQueue::builder("redis://localhost:6380")
+    let queue_url = std::env::var("BROCCOLI_QUEUE_URL").unwrap();
+    BroccoliQueue::builder(queue_url)
         .pool_connections(5)
         .build()
         .await
-        .expect("Queue setup failed. Are you sure Redis is running on localhost:6380?")
+        .expect("Queue setup failed. Are you sure Redis/RabbitMQ is running?")
 }
 
 pub async fn setup_queue_with_url(

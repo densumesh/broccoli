@@ -9,8 +9,7 @@ repository = "https://github.com/densumesh/broccoli"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bb8-redis = "0.18.0"
-redis = { version = "0.27.5", features = ["tokio-rustls-comp", "aio"] }
+
 serde = { version = "1.0.216", features = ["derive"] }
 serde_json = "1.0.133"
 tokio = "1.42.0"
@@ -21,9 +20,24 @@ futures = "0.3.31"
 sha256 = "1.5.0"
 log = "0.4.22"
 time = "0.3.37"
+lapin = { version = "2.5.0", optional = true }
+deadpool = { version = "0.12.1", optional = true }
+deadpool-lapin = { version = "0.12.1", optional = true }
+bb8-redis = { version = "0.18.0", optional = true }
+redis = { version = "0.27.5", features = [
+    "tokio-rustls-comp",
+    "aio",
+], optional = true }
+dashmap = "6.1.0"
 
 [dev-dependencies]
 tokio = { version = "1.42.0", features = ["full"] }
 chrono = { version = "0.4.39", features = ["serde"] }
 env_logger = "0.11.5"
 lazy_static = "1.4"
+
+[features]
+default = []
+redis = ["dep:bb8-redis", "dep:redis"]
+rabbitmq = ["dep:lapin", "dep:deadpool", "dep:deadpool-lapin"]
+rabbitmq-delay = []

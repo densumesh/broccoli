@@ -3,7 +3,7 @@ use redis::{AsyncCommands, LposOptions};
 use crate::{
     brokers::broker::{Broker, BrokerConfig, InternalBrokerMessage},
     error::BroccoliError,
-    queue::PublishOptions,
+    queue::{ConsumeOptions, PublishOptions},
 };
 
 pub(crate) type RedisPool = bb8_redis::bb8::Pool<bb8_redis::RedisConnectionManager>;
@@ -189,11 +189,14 @@ impl Broker for RedisBroker {
     async fn try_consume(
         &self,
         queue_name: &str,
+        options: Option<ConsumeOptions>,
     ) -> Result<Option<InternalBrokerMessage>, BroccoliError> {
         let redis_pool = self.ensure_pool()?;
         let mut redis_connection = get_redis_connection(&redis_pool).await?;
 
-        let task_id: Option<String> = self.get_task_id(queue_name, &mut redis_connection).await?;
+        let task_id: Option<String> = self
+            .get_task_id(queue_name, &mut redis_connection, options)
+            .await?;
 
         if task_id.is_none() {
             return Ok(None);
@@ -214,12 +217,16 @@ impl Broker for RedisBroker {
     ///
     /// # Returns
     /// A `Result` containing the message as a `String`, or a `BroccoliError` on failure.
-    async fn consume(&self, queue_name: &str) -> Result<InternalBrokerMessage, BroccoliError> {
+    async fn consume(
+        &self,
+        queue_name: &str,
+        options: Option<ConsumeOptions>,
+    ) -> Result<InternalBrokerMessage, BroccoliError> {
         self.ensure_pool()?;
         let mut message: Option<InternalBrokerMessage> = None;
 
         while message.is_none() {
-            message = self.try_consume(queue_name).await?;
+            message = self.try_consume(queue_name, options.clone()).await?;
             if message.is_none() {
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             }

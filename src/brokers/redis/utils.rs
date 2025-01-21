@@ -3,10 +3,13 @@
 //! This module provides helper methods for managing Redis message operations,
 //! including message parsing and manipulation of message metadata.
 
+use std::num::NonZero;
+
 use super::broker::{RedisBroker, RedisConnection, RedisPool};
 use crate::{
     brokers::broker::{BrokerConfig, InternalBrokerMessage},
     error::BroccoliError,
+    queue::ConsumeOptions,
 };
 use redis::{AsyncCommands, FromRedisValue};
 
@@ -50,6 +53,7 @@ impl RedisBroker {
         &self,
         queue_name: &str,
         redis_connection: &mut RedisConnection<'_>,
+        options: Option<ConsumeOptions>,
     ) -> Result<Option<String>, BroccoliError> {
         let expired_messages: Vec<String> = redis_connection
             .zrangebyscore(
@@ -103,6 +107,10 @@ impl RedisBroker {
                 )
                 .await?;
             Ok(Some(task_id))
+        } else if options.is_some_and(|x| x.auto_ack.unwrap_or(false)) {
+            let popped_messages: Vec<String> =
+                redis_connection.rpop(queue_name, NonZero::new(1)).await?;
+            Ok(popped_messages.first().cloned())
         } else {
             Ok(redis_connection
                 .lmove(
@@ -136,6 +144,7 @@ impl FromRedisValue for InternalBrokerMessage {
             task_id: task_id.to_string(),
             payload: payload.to_string(),
             attempts: attempts.parse().unwrap_or_default(),
+            metadata: None,
         })
     }
 }

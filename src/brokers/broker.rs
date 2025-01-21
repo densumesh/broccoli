@@ -1,4 +1,9 @@
-use crate::{error::BroccoliError, queue::PublishOptions};
+use std::collections::HashMap;
+
+use crate::{
+    error::BroccoliError,
+    queue::{ConsumeOptions, PublishOptions},
+};
 
 /// Trait for message broker implementations.
 #[async_trait::async_trait]
@@ -38,6 +43,7 @@ pub trait Broker: Send + Sync {
     async fn try_consume(
         &self,
         queue_name: &str,
+        options: Option<ConsumeOptions>,
     ) -> Result<Option<InternalBrokerMessage>, BroccoliError>;
 
     /// Consumes a message from the specified queue, blocking until a message is available.
@@ -47,7 +53,11 @@ pub trait Broker: Send + Sync {
     ///
     /// # Returns
     /// A `Result` containing the message as a `String`, or a `BroccoliError` on failure.
-    async fn consume(&self, queue_name: &str) -> Result<InternalBrokerMessage, BroccoliError>;
+    async fn consume(
+        &self,
+        queue_name: &str,
+        options: Option<ConsumeOptions>,
+    ) -> Result<InternalBrokerMessage, BroccoliError>;
 
     /// Acknowledges the processing of a message, removing it from the processing queue.
     ///
@@ -134,6 +144,9 @@ pub struct BrokerMessage<T: Clone + serde::Serialize> {
     pub payload: T,
     /// Number of processing attempts made
     pub attempts: u8,
+    /// Additional metadata for the message
+    #[serde(skip)]
+    pub metadata: Option<HashMap<String, String>>,
 }
 
 impl<T: Clone + serde::Serialize> BrokerMessage<T> {
@@ -143,6 +156,7 @@ impl<T: Clone + serde::Serialize> BrokerMessage<T> {
             task_id: uuid::Uuid::new_v4(),
             payload,
             attempts: 0,
+            metadata: None,
         }
     }
 
@@ -152,6 +166,7 @@ impl<T: Clone + serde::Serialize> BrokerMessage<T> {
             task_id: uuid::Uuid::new_v4(),
             payload,
             attempts,
+            metadata: None,
         }
     }
 }
@@ -165,15 +180,24 @@ pub struct InternalBrokerMessage {
     pub payload: String,
     /// Number of processing attempts made
     pub attempts: u8,
+    /// Additional metadata for the message
+    #[serde(skip)]
+    pub metadata: Option<HashMap<String, String>>,
 }
 
 impl InternalBrokerMessage {
     /// Creates a new `InternalBrokerMessage` with the provided metadata.
-    pub fn new(task_id: String, payload: String, attempts: u8) -> Self {
+    pub fn new(
+        task_id: String,
+        payload: String,
+        attempts: u8,
+        metadata: Option<HashMap<String, String>>,
+    ) -> Self {
         InternalBrokerMessage {
             task_id,
             payload,
             attempts,
+            metadata,
         }
     }
 }
@@ -184,6 +208,7 @@ impl<T: Clone + serde::Serialize> From<BrokerMessage<T>> for InternalBrokerMessa
             task_id: msg.task_id.to_string(),
             payload: serde_json::to_string(&msg.payload).unwrap_or_default(),
             attempts: msg.attempts,
+            metadata: msg.metadata,
         }
     }
 }
@@ -194,6 +219,7 @@ impl<T: Clone + serde::Serialize> From<&BrokerMessage<T>> for InternalBrokerMess
             task_id: msg.task_id.to_string(),
             payload: serde_json::to_string(&msg.payload).unwrap_or_default(),
             attempts: msg.attempts,
+            metadata: msg.metadata.clone(),
         }
     }
 }
@@ -209,6 +235,7 @@ impl InternalBrokerMessage {
                 BroccoliError::Broker(format!("Failed to parse message payload: {}", e))
             })?,
             attempts: self.attempts,
+            metadata: self.metadata.clone(),
         })
     }
 }
@@ -216,5 +243,9 @@ impl InternalBrokerMessage {
 /// Supported message broker implementations.
 pub enum BrokerType {
     /// Redis-based message broker
+    #[cfg(feature = "redis")]
     Redis,
+    /// RabbitMQ-based message broker
+    #[cfg(feature = "rabbitmq")]
+    RabbitMQ,
 }
