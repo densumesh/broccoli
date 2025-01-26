@@ -1,0 +1,68 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis
+        ports:
+          - 6379:6379
+      rabbitmq:
+        image: rabbitmq:management
+        ports:
+          - 5672:5672
+          - 15672:15672
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Run Redis tests
+        run: cargo test --features redis
+        env:
+          BROCCOLI_QUEUE_URL: redis://localhost:6379
+
+      - name: Run RabbitMQ tests
+        run: cargo test --features rabbitmq
+        env:
+          BROCCOLI_QUEUE_URL: amqp://localhost:5672
+
+      - name: Run RabbitMQ tests with delay plugin
+        run: |
+          docker stop ${{ job.services.rabbitmq.id }}
+          docker build -f Dockerfile.rabbitmq -t rabbitmq-with-delays .
+          docker run -d --name rabbitmq-delay -p 5672:5672 -p 15672:15672 rabbitmq-with-delays
+          sleep 15 # Wait for RabbitMQ to start
+          cargo test --features rabbitmq,rabbitmq-delay
+        env:
+          BROCCOLI_QUEUE_URL: amqp://localhost:5672
