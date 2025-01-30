@@ -28,6 +28,7 @@ pub trait Broker: Send + Sync {
     async fn publish(
         &self,
         queue_name: &str,
+        #[cfg(feature = "fairness")] disambiguator: String,
         message: &[InternalBrokerMessage],
         options: Option<PublishOptions>,
     ) -> Result<Vec<InternalBrokerMessage>, BroccoliError>;
@@ -84,6 +85,7 @@ pub trait Broker: Send + Sync {
     async fn reject(
         &self,
         queue_name: &str,
+        #[cfg(feature = "fairness")] disambiguator: String,
         message: InternalBrokerMessage,
     ) -> Result<(), BroccoliError>;
 
@@ -136,6 +138,9 @@ pub struct BrokerMessage<T: Clone + serde::Serialize> {
     pub payload: T,
     /// Number of processing attempts made
     pub attempts: u8,
+    #[cfg(feature = "fairness")]
+    /// Disambiguator for message fairness
+    pub disambiguator: String,
     /// Additional metadata for the message
     #[serde(skip)]
     pub(crate) metadata: Option<HashMap<String, MetadataTypes>>,
@@ -143,21 +148,13 @@ pub struct BrokerMessage<T: Clone + serde::Serialize> {
 
 impl<T: Clone + serde::Serialize> BrokerMessage<T> {
     /// Creates a new `BrokerMessage` with the provided payload.
-    pub fn new(payload: T) -> Self {
+    pub fn new(payload: T, #[cfg(feature = "fairness")] disambiguator: String) -> Self {
         BrokerMessage {
             task_id: uuid::Uuid::new_v4(),
             payload,
             attempts: 0,
-            metadata: None,
-        }
-    }
-
-    /// Creates a new `BrokerMessage` with the provided payload and number of attempts.
-    pub fn new_with_attempts(payload: T, attempts: u8) -> Self {
-        BrokerMessage {
-            task_id: uuid::Uuid::new_v4(),
-            payload,
-            attempts,
+            #[cfg(feature = "fairness")]
+            disambiguator,
             metadata: None,
         }
     }
@@ -178,6 +175,9 @@ pub struct InternalBrokerMessage {
     pub payload: String,
     /// Number of processing attempts made
     pub attempts: u8,
+    #[cfg(feature = "fairness")]
+    /// Disambiguator for message fairness
+    pub disambiguator: String,
     /// Additional metadata for the message
     #[serde(skip)]
     pub(crate) metadata: Option<HashMap<String, MetadataTypes>>,
@@ -185,11 +185,18 @@ pub struct InternalBrokerMessage {
 
 impl InternalBrokerMessage {
     /// Creates a new `InternalBrokerMessage` with the provided metadata.
-    pub fn new(task_id: String, payload: String, attempts: u8) -> Self {
+    pub fn new(
+        task_id: String,
+        payload: String,
+        attempts: u8,
+        #[cfg(feature = "fairness")] disambiguator: String,
+    ) -> Self {
         InternalBrokerMessage {
             task_id,
             payload,
             attempts,
+            #[cfg(feature = "fairness")]
+            disambiguator,
             metadata: None,
         }
     }
@@ -201,6 +208,8 @@ impl<T: Clone + serde::Serialize> From<BrokerMessage<T>> for InternalBrokerMessa
             task_id: msg.task_id.to_string(),
             payload: serde_json::to_string(&msg.payload).unwrap_or_default(),
             attempts: msg.attempts,
+            #[cfg(feature = "fairness")]
+            disambiguator: msg.disambiguator,
             metadata: msg.metadata,
         }
     }
@@ -212,6 +221,8 @@ impl<T: Clone + serde::Serialize> From<&BrokerMessage<T>> for InternalBrokerMess
             task_id: msg.task_id.to_string(),
             payload: serde_json::to_string(&msg.payload).unwrap_or_default(),
             attempts: msg.attempts,
+            #[cfg(feature = "fairness")]
+            disambiguator: msg.disambiguator.clone(),
             metadata: msg.metadata.clone(),
         }
     }
@@ -228,6 +239,8 @@ impl InternalBrokerMessage {
                 BroccoliError::Broker(format!("Failed to parse message payload: {}", e))
             })?,
             attempts: self.attempts,
+            #[cfg(feature = "fairness")]
+            disambiguator: self.disambiguator.clone(),
             metadata: self.metadata.clone(),
         })
     }

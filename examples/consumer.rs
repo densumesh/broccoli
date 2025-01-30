@@ -40,7 +40,7 @@ async fn error_handler(msg: JobPayload, err: BroccoliError) -> Result<(), Brocco
 async fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
     #[cfg(feature = "redis")]
-    let queue_url = "redis://localhost:6379";
+    let queue_url = "redis://localhost:6380";
     #[cfg(feature = "rabbitmq")]
     let queue_url = "amqp://localhost:5672";
 

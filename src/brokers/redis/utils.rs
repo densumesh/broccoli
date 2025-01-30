@@ -49,6 +49,7 @@ impl RedisBroker {
         }
     }
 
+    #[cfg(not(feature = "fairness"))]
     pub(crate) async fn get_task_id(
         &self,
         queue_name: &str,
@@ -73,6 +74,66 @@ impl RedisBroker {
         if options.is_some_and(|x| x.auto_ack.unwrap_or(false)) {
             Ok(popped_message.map(|(popped_message, _)| popped_message))
         } else if let Some((popped_message, _)) = popped_message {
+            redis_connection
+                .lpush::<String, &String, ()>(format!("{}_processing", queue_name), &popped_message)
+                .await?;
+            Ok(Some(popped_message))
+        } else {
+            Ok(None)
+        }
+    }
+
+    #[cfg(feature = "fairness")]
+    pub(crate) async fn get_task_id(
+        &self,
+        queue_name: &str,
+        redis_connection: &mut RedisConnection<'_>,
+        options: Option<ConsumeOptions>,
+    ) -> Result<Option<String>, BroccoliError> {
+        let script = redis::Script::new(
+            r#"
+            local current_time = tonumber(ARGV[1])
+            local queue_to_process = redis.call('LPOP', KEYS[1])
+            if not queue_to_process then
+            return nil
+            end
+
+            local popped_message = redis.call('ZPOPMIN', string.format("%s_%s_queue", KEYS[2], queue_to_process), 1)
+            if #popped_message == 0 then
+            return nil
+            end
+
+            local message = popped_message[1]
+            local score = tonumber(popped_message[2])
+
+            if score > (5.0 * current_time) then
+            redis.call('ZADD', string.format("%s_%s_queue", KEYS[2], queue_to_process), score, message)
+            redis.call('RPUSH', KEYS[1], queue_to_process)
+            return nil
+            end
+
+            local does_subqueue_exist = redis.call('EXISTS', string.format("%s_%s_queue", KEYS[2], queue_to_process)) == 1
+            if does_subqueue_exist then
+            redis.call('RPUSH', KEYS[1], queue_to_process)
+            else
+            redis.call('SREM', KEYS[3], queue_to_process)
+            end
+
+            return message
+        "#,
+        );
+
+        let popped_message: Option<String> = script
+            .arg(time::OffsetDateTime::now_utc().unix_timestamp_nanos() as f64)
+            .key(format!("{}_fairness_round_robin", queue_name))
+            .key(queue_name)
+            .key(format!("{}_fairness_set", queue_name))
+            .invoke_async(&mut **redis_connection)
+            .await?;
+
+        if options.is_some_and(|x| x.auto_ack.unwrap_or(false)) {
+            Ok(popped_message)
+        } else if let Some(popped_message) = popped_message {
             redis_connection
                 .lpush::<String, &String, ()>(format!("{}_processing", queue_name), &popped_message)
                 .await?;
@@ -108,6 +169,11 @@ impl FromRedisValue for OptionalInternalBrokerMessage {
             redis::RedisError::from((redis::ErrorKind::TypeError, "Missing field: priority"))
         })?;
 
+        #[cfg(feature = "fairness")]
+        let disambiguator = map.get("disambiguator").ok_or_else(|| {
+            redis::RedisError::from((redis::ErrorKind::TypeError, "Missing field: disambiguator"))
+        })?;
+
         let mut metadata = HashMap::new();
         metadata.insert(
             "priority".to_string(),
@@ -118,6 +184,8 @@ impl FromRedisValue for OptionalInternalBrokerMessage {
             task_id: task_id.to_string(),
             payload: payload.to_string(),
             attempts: attempts.parse().unwrap_or_default(),
+            #[cfg(feature = "fairness")]
+            disambiguator: disambiguator.to_string(),
             metadata: Some(metadata),
         })))
     }

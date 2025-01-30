@@ -1,4 +1,4 @@
 {
   "rust-analyzer.showUnlinkedFileNotification": false,
-  "rust-analyzer.cargo.features": ["redis", "rabbitmq"]
+  "rust-analyzer.cargo.features": ["redis", "rabbitmq", "fairness"]
 }

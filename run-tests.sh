@@ -15,6 +15,13 @@ run_redis_test() {
     BROCCOLI_QUEUE_URL=redis://localhost:6380 cargo test --features redis
 }
 
+run_redis_fairness_test() {
+    echo "Starting Redis fairness tests..."
+    docker run --name test-redis -d -p 6380:6379 redis >/dev/null
+    sleep 2
+    BROCCOLI_QUEUE_URL=redis://localhost:6380 cargo test --features "redis,fairness" --test fairness
+}
+
 run_rabbitmq_test() {
     echo "Starting RabbitMQ test with delay plugin..."
     docker build -f Dockerfile.rabbitmq -t rabbitmq-with-delays .
@@ -33,10 +40,13 @@ run_redis_bench() {
 
 case "$1" in
     "redis") run_redis_test ;;
+    "redis-fairness") run_redis_fairness_test ;;
     "rabbitmq") run_rabbitmq_test ;;
     "redis-bench") run_redis_bench ;;
     *)
         run_redis_test
+        cleanup
+        run_redis_fairness_test
         cleanup
         run_rabbitmq_test
         ;;

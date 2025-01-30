@@ -23,7 +23,7 @@ struct Parameters {
 #[tokio::main]
 async fn main() -> Result<(), BroccoliError> {
     #[cfg(feature = "redis")]
-    let queue_url = "redis://localhost:6379";
+    let queue_url = "redis://localhost:6380";
     #[cfg(feature = "rabbitmq")]
     let queue_url = "amqp://localhost:5672";
 
@@ -60,9 +60,24 @@ async fn main() -> Result<(), BroccoliError> {
 
     // Publish jobs in batch
     println!("Publishing delayed jobs...");
+    #[cfg(not(feature = "fairness"))]
     let scheduled_jobs = queue
         .publish_batch(
             "jobs",
+            scheduled_jobs,
+            Some(PublishOptions {
+                delay: Some(Duration::seconds(10)),
+                scheduled_at: None,
+                ttl: None,
+                priority: None,
+            }),
+        )
+        .await?;
+    #[cfg(feature = "fairness")]
+    let scheduled_jobs = queue
+        .publish_batch(
+            "jobs",
+            String::from("job-1"),
             scheduled_jobs,
             Some(PublishOptions {
                 delay: Some(Duration::seconds(10)),
@@ -103,7 +118,12 @@ async fn main() -> Result<(), BroccoliError> {
 
     // Publish jobs in batch
     println!("Publishing immediate jobs...");
+    #[cfg(not(feature = "fairness"))]
     let immediate_jobs = queue.publish_batch("jobs", immediate_jobs, None).await?;
+    #[cfg(feature = "fairness")]
+    let immediate_jobs = queue
+        .publish_batch("jobs", String::from("job-2"), immediate_jobs, None)
+        .await?;
 
     println!(
         "Published immediate jobs: {:?}",

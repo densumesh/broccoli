@@ -26,7 +26,12 @@ async fn test_empty_payload() {
         content: "".to_string(),
     };
 
+    #[cfg(not(feature = "fairness"))]
     let result = queue.publish(test_topic, &empty_message, None).await;
+    #[cfg(feature = "fairness")]
+    let result = queue
+        .publish(test_topic, String::from("job-1"), &empty_message, None)
+        .await;
     assert!(result.is_ok());
 
     let consumed = queue
@@ -46,8 +51,12 @@ async fn test_very_large_payload() {
         id: "large".to_string(),
         content: large_content.clone(),
     };
-
+    #[cfg(not(feature = "fairness"))]
     let result = queue.publish(test_topic, &large_message, None).await;
+    #[cfg(feature = "fairness")]
+    let result = queue
+        .publish(test_topic, String::from("job-1"), &large_message, None)
+        .await;
     assert!(result.is_ok());
 
     let consumed = queue
@@ -70,8 +79,15 @@ async fn test_concurrent_consume() {
         })
         .collect();
 
+    #[cfg(not(feature = "fairness"))]
     queue
         .publish_batch(test_topic, messages, None)
+        .await
+        .unwrap();
+
+    #[cfg(feature = "fairness")]
+    queue
+        .publish_batch(test_topic, String::from("job-1"), messages, None)
         .await
         .unwrap();
 
@@ -115,8 +131,14 @@ async fn test_zero_ttl() {
 
     let options = PublishOptions::builder().ttl(Duration::seconds(0)).build();
 
+    #[cfg(not(feature = "fairness"))]
     queue
         .publish(test_topic, &message, Some(options))
+        .await
+        .unwrap();
+    #[cfg(feature = "fairness")]
+    queue
+        .publish(test_topic, String::from("job-1"), &message, Some(options))
         .await
         .unwrap();
 
@@ -167,7 +189,13 @@ async fn test_message_ordering() {
     ];
 
     for (msg, opt) in messages {
+        #[cfg(not(feature = "fairness"))]
         queue.publish(test_topic, &msg, opt).await.unwrap();
+        #[cfg(feature = "fairness")]
+        queue
+            .publish(test_topic, String::from("job-1"), &msg, opt)
+            .await
+            .unwrap();
     }
 
     // Consume messages

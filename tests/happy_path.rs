@@ -23,8 +23,14 @@ async fn test_publish_and_consume() {
     };
 
     // Publish message
+    #[cfg(not(feature = "fairness"))]
     let published = queue
         .publish(test_topic, &message, None)
+        .await
+        .expect("Failed to publish message");
+    #[cfg(feature = "fairness")]
+    let published = queue
+        .publish(test_topic, String::from("job-1"), &message, None)
         .await
         .expect("Failed to publish message");
 
@@ -56,8 +62,14 @@ async fn test_batch_publish_and_consume() {
     ];
 
     // Publish batch
+    #[cfg(not(feature = "fairness"))]
     let published = queue
         .publish_batch(test_topic, messages.clone(), None)
+        .await
+        .expect("Failed to publish batch");
+    #[cfg(feature = "fairness")]
+    let published = queue
+        .publish_batch(test_topic, String::from("job-1"), messages.clone(), None)
         .await
         .expect("Failed to publish batch");
 
@@ -87,8 +99,14 @@ async fn test_delayed_message() {
         .delay(time::Duration::seconds(2))
         .build();
 
+    #[cfg(not(feature = "fairness"))]
     queue
         .publish(test_topic, &message, Some(options))
+        .await
+        .expect("Failed to publish delayed message");
+    #[cfg(feature = "fairness")]
+    queue
+        .publish(test_topic, String::from("job-1"), &message, Some(options))
         .await
         .expect("Failed to publish delayed message");
 
@@ -125,8 +143,14 @@ async fn test_scheduled_message() {
     let schedule_time = time::OffsetDateTime::now_utc() + time::Duration::seconds(2);
     let options = PublishOptions::builder().schedule_at(schedule_time).build();
 
+    #[cfg(not(feature = "fairness"))]
     let published = queue
         .publish(test_topic, &message, Some(options))
+        .await
+        .expect("Failed to publish scheduled message");
+    #[cfg(feature = "fairness")]
+    let published = queue
+        .publish(test_topic, String::from("job-1"), &message, Some(options))
         .await
         .expect("Failed to publish scheduled message");
 
@@ -161,8 +185,14 @@ async fn test_message_retry() {
     };
 
     // Publish message
+    #[cfg(not(feature = "fairness"))]
     queue
         .publish(test_topic, &message, None)
+        .await
+        .expect("Failed to publish message");
+    #[cfg(feature = "fairness")]
+    queue
+        .publish(test_topic, String::from("job-1"), &message, None)
         .await
         .expect("Failed to publish message");
 
@@ -174,8 +204,14 @@ async fn test_message_retry() {
             .expect("Failed to consume message");
 
         // Reject the message
+        #[cfg(not(feature = "fairness"))]
         queue
             .reject(test_topic, consumed)
+            .await
+            .expect("Failed to reject message");
+        #[cfg(feature = "fairness")]
+        queue
+            .reject(test_topic, String::from("job-1"), consumed)
             .await
             .expect("Failed to reject message");
     }
@@ -199,8 +235,14 @@ async fn test_message_acknowledgment() {
     };
 
     // Publish message
+    #[cfg(not(feature = "fairness"))]
     queue
         .publish(test_topic, &message, None)
+        .await
+        .expect("Failed to publish message");
+    #[cfg(feature = "fairness")]
+    queue
+        .publish(test_topic, String::from("job-1"), &message, None)
         .await
         .expect("Failed to publish message");
 
@@ -234,8 +276,14 @@ async fn test_message_auto_ack() {
     };
 
     // Publish message
+    #[cfg(not(feature = "fairness"))]
     queue
         .publish(test_topic, &message, None)
+        .await
+        .expect("Failed to publish message");
+    #[cfg(feature = "fairness")]
+    queue
+        .publish(test_topic, String::from("job-1"), &message, None)
         .await
         .expect("Failed to publish message");
 
@@ -264,11 +312,16 @@ async fn test_message_cancellation() {
     };
 
     // Publish message
+    #[cfg(not(feature = "fairness"))]
     let published = queue
         .publish(test_topic, &message, None)
         .await
         .expect("Failed to publish message");
-
+    #[cfg(feature = "fairness")]
+    let published = queue
+        .publish(test_topic, String::from("job-1"), &message, None)
+        .await
+        .expect("Failed to publish message");
     // Cancel the message
     let result = queue
         .cancel(test_topic, published.task_id.to_string())
@@ -319,18 +372,51 @@ async fn test_message_priority() {
     let options_high = PublishOptions::builder().priority(1).build();
     let options_medium = PublishOptions::builder().priority(3).build();
 
+    #[cfg(not(feature = "fairness"))]
     queue
         .publish(test_topic, &messages[0], Some(options_low))
         .await
         .expect("Failed to publish low priority message");
+    #[cfg(feature = "fairness")]
+    queue
+        .publish(
+            test_topic,
+            String::from("job-1"),
+            &messages[0],
+            Some(options_low),
+        )
+        .await
+        .expect("Failed to publish low priority message");
 
+    #[cfg(not(feature = "fairness"))]
     queue
         .publish(test_topic, &messages[1], Some(options_high))
         .await
         .expect("Failed to publish high priority message");
+    #[cfg(feature = "fairness")]
+    queue
+        .publish(
+            test_topic,
+            String::from("job-1"),
+            &messages[1],
+            Some(options_high),
+        )
+        .await
+        .expect("Failed to publish high priority message");
 
+    #[cfg(not(feature = "fairness"))]
     queue
         .publish(test_topic, &messages[2], Some(options_medium))
+        .await
+        .expect("Failed to publish medium priority message");
+    #[cfg(feature = "fairness")]
+    queue
+        .publish(
+            test_topic,
+            String::from("job-1"),
+            &messages[2],
+            Some(options_medium),
+        )
         .await
         .expect("Failed to publish medium priority message");
 
