@@ -48,7 +48,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let queue = BroccoliQueue::builder(queue_url)
         .pool_connections(5)
         .failed_message_retry_strategy(Default::default())
-        .enable_scheduling(true)
         .build()
         .await?;
 

@@ -78,7 +78,7 @@ impl Broker for RabbitMQBroker {
     async fn publish(
         &self,
         queue_name: &str,
-        #[cfg(feature = "fairness")] _disambiguator: String,
+        _disambiguator: Option<String>,
         messages: &[InternalBrokerMessage],
         options: Option<PublishOptions>,
     ) -> Result<Vec<InternalBrokerMessage>, BroccoliError> {
@@ -221,8 +221,7 @@ impl Broker for RabbitMQBroker {
                 task_id,
                 payload,
                 attempts,
-                #[cfg(feature = "fairness")]
-                disambiguator: "".to_string(),
+                disambiguator: None,
                 metadata: Some(metadata),
             }))
         } else {
@@ -295,8 +294,7 @@ impl Broker for RabbitMQBroker {
                 task_id,
                 payload,
                 attempts,
-                #[cfg(feature = "fairness")]
-                disambiguator: "".to_string(),
+                disambiguator: None,
                 metadata: Some(metadata),
             })
         } else {
@@ -342,7 +340,6 @@ impl Broker for RabbitMQBroker {
     async fn reject(
         &self,
         queue_name: &str,
-        #[cfg(feature = "fairness")] disambiguator: String,
         message: InternalBrokerMessage,
     ) -> Result<(), BroccoliError> {
         let delivery_tag = message
@@ -373,14 +370,7 @@ impl Broker for RabbitMQBroker {
             .await
             .map_err(|e| BroccoliError::Cancel(format!("Failed to cancel message: {}", e)))?;
         if message.attempts < 3 {
-            self.publish(
-                queue_name,
-                #[cfg(feature = "fairness")]
-                disambiguator,
-                &[message],
-                None,
-            )
-            .await?;
+            self.publish(queue_name, None, &[message], None).await?;
         }
 
         Ok(())

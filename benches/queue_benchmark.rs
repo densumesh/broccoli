@@ -87,13 +87,7 @@ async fn benchmark_broccoli_throughput(queue: &BroccoliQueue, message_count: usi
 
     // Publish messages
     for msg in &messages {
-        #[cfg(not(feature = "fairness"))]
-        queue.publish(queue_name, msg, None).await.unwrap();
-        #[cfg(feature = "fairness")]
-        queue
-            .publish(queue_name, String::from("job-1"), msg, None)
-            .await
-            .unwrap();
+        queue.publish(queue_name, None, msg, None).await.unwrap();
     }
 
     // Consume messages

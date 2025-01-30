@@ -18,7 +18,11 @@ async fn test_invalid_broker_url() {
 
 #[tokio::test]
 async fn test_empty_payload() {
+    #[cfg(not(feature = "test-fairness"))]
     let queue = common::setup_queue().await;
+    #[cfg(feature = "test-fairness")]
+    let queue = common::setup_fair_queue().await;
+
     let test_topic = "test_empty_topic";
 
     let empty_message = TestMessage {
@@ -26,11 +30,16 @@ async fn test_empty_payload() {
         content: "".to_string(),
     };
 
-    #[cfg(not(feature = "fairness"))]
-    let result = queue.publish(test_topic, &empty_message, None).await;
-    #[cfg(feature = "fairness")]
+    #[cfg(not(feature = "test-fairness"))]
+    let result = queue.publish(test_topic, None, &empty_message, None).await;
+    #[cfg(feature = "test-fairness")]
     let result = queue
-        .publish(test_topic, String::from("job-1"), &empty_message, None)
+        .publish(
+            test_topic,
+            Some(String::from("job-1")),
+            &empty_message,
+            None,
+        )
         .await;
     assert!(result.is_ok());
 
@@ -43,7 +52,10 @@ async fn test_empty_payload() {
 
 #[tokio::test]
 async fn test_very_large_payload() {
+    #[cfg(not(feature = "test-fairness"))]
     let queue = common::setup_queue().await;
+    #[cfg(feature = "test-fairness")]
+    let queue = common::setup_fair_queue().await;
     let test_topic = "test_large_topic";
 
     let large_content = "x".repeat(1024 * 1024); // 1MB of data
@@ -51,11 +63,16 @@ async fn test_very_large_payload() {
         id: "large".to_string(),
         content: large_content.clone(),
     };
-    #[cfg(not(feature = "fairness"))]
-    let result = queue.publish(test_topic, &large_message, None).await;
-    #[cfg(feature = "fairness")]
+    #[cfg(not(feature = "test-fairness"))]
+    let result = queue.publish(test_topic, None, &large_message, None).await;
+    #[cfg(feature = "test-fairness")]
     let result = queue
-        .publish(test_topic, String::from("job-1"), &large_message, None)
+        .publish(
+            test_topic,
+            Some(String::from("job-1")),
+            &large_message,
+            None,
+        )
         .await;
     assert!(result.is_ok());
 
@@ -68,7 +85,10 @@ async fn test_very_large_payload() {
 
 #[tokio::test]
 async fn test_concurrent_consume() {
+    #[cfg(not(feature = "test-fairness"))]
     let queue = common::setup_queue().await;
+    #[cfg(feature = "test-fairness")]
+    let queue = common::setup_fair_queue().await;
     let test_topic = "test_concurrent_topic";
 
     // Publish multiple messages
@@ -79,15 +99,15 @@ async fn test_concurrent_consume() {
         })
         .collect();
 
-    #[cfg(not(feature = "fairness"))]
+    #[cfg(not(feature = "test-fairness"))]
     queue
-        .publish_batch(test_topic, messages, None)
+        .publish_batch(test_topic, None, messages, None)
         .await
         .unwrap();
 
-    #[cfg(feature = "fairness")]
+    #[cfg(feature = "test-fairness")]
     queue
-        .publish_batch(test_topic, String::from("job-1"), messages, None)
+        .publish_batch(test_topic, Some(String::from("job-1")), messages, None)
         .await
         .unwrap();
 
@@ -121,7 +141,10 @@ async fn test_concurrent_consume() {
 
 #[tokio::test]
 async fn test_zero_ttl() {
+    #[cfg(not(feature = "test-fairness"))]
     let queue = common::setup_queue().await;
+    #[cfg(feature = "test-fairness")]
+    let queue = common::setup_fair_queue().await;
     let test_topic = "test_zero_ttl_topic";
 
     let message = TestMessage {
@@ -131,14 +154,19 @@ async fn test_zero_ttl() {
 
     let options = PublishOptions::builder().ttl(Duration::seconds(0)).build();
 
-    #[cfg(not(feature = "fairness"))]
+    #[cfg(not(feature = "test-fairness"))]
     queue
-        .publish(test_topic, &message, Some(options))
+        .publish(test_topic, None, &message, Some(options))
         .await
         .unwrap();
-    #[cfg(feature = "fairness")]
+    #[cfg(feature = "test-fairness")]
     queue
-        .publish(test_topic, String::from("job-1"), &message, Some(options))
+        .publish(
+            test_topic,
+            Some(String::from("job-1")),
+            &message,
+            Some(options),
+        )
         .await
         .unwrap();
 
@@ -152,7 +180,10 @@ async fn test_zero_ttl() {
 
 #[tokio::test]
 async fn test_message_ordering() {
+    #[cfg(not(feature = "test-fairness"))]
     let queue = common::setup_queue().await;
+    #[cfg(feature = "test-fairness")]
+    let queue = common::setup_fair_queue().await;
     let test_topic = "test_ordering_topic";
 
     // Publish messages with different delays
@@ -189,11 +220,11 @@ async fn test_message_ordering() {
     ];
 
     for (msg, opt) in messages {
-        #[cfg(not(feature = "fairness"))]
-        queue.publish(test_topic, &msg, opt).await.unwrap();
-        #[cfg(feature = "fairness")]
+        #[cfg(not(feature = "test-fairness"))]
+        queue.publish(test_topic, None, &msg, opt).await.unwrap();
+        #[cfg(feature = "test-fairness")]
         queue
-            .publish(test_topic, String::from("job-1"), &msg, opt)
+            .publish(test_topic, Some(String::from("job-1")), &msg, opt)
             .await
             .unwrap();
     }

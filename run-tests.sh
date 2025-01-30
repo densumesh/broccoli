@@ -19,7 +19,7 @@ run_redis_fairness_test() {
     echo "Starting Redis fairness tests..."
     docker run --name test-redis -d -p 6380:6379 redis >/dev/null
     sleep 2
-    BROCCOLI_QUEUE_URL=redis://localhost:6380 cargo test --features "redis,fairness" --test fairness
+    BROCCOLI_QUEUE_URL=redis://localhost:6380 cargo test --features "redis,test-fairness"
 }
 
 run_rabbitmq_test() {

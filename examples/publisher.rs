@@ -30,7 +30,6 @@ async fn main() -> Result<(), BroccoliError> {
     let queue = BroccoliQueue::builder(queue_url)
         .failed_message_retry_strategy(Default::default())
         .pool_connections(5)
-        .enable_scheduling(true)
         .build()
         .await?;
 
@@ -60,24 +59,10 @@ async fn main() -> Result<(), BroccoliError> {
 
     // Publish jobs in batch
     println!("Publishing delayed jobs...");
-    #[cfg(not(feature = "fairness"))]
     let scheduled_jobs = queue
         .publish_batch(
             "jobs",
-            scheduled_jobs,
-            Some(PublishOptions {
-                delay: Some(Duration::seconds(10)),
-                scheduled_at: None,
-                ttl: None,
-                priority: None,
-            }),
-        )
-        .await?;
-    #[cfg(feature = "fairness")]
-    let scheduled_jobs = queue
-        .publish_batch(
-            "jobs",
-            String::from("job-1"),
+            None,
             scheduled_jobs,
             Some(PublishOptions {
                 delay: Some(Duration::seconds(10)),
@@ -118,11 +103,8 @@ async fn main() -> Result<(), BroccoliError> {
 
     // Publish jobs in batch
     println!("Publishing immediate jobs...");
-    #[cfg(not(feature = "fairness"))]
-    let immediate_jobs = queue.publish_batch("jobs", immediate_jobs, None).await?;
-    #[cfg(feature = "fairness")]
     let immediate_jobs = queue
-        .publish_batch("jobs", String::from("job-2"), immediate_jobs, None)
+        .publish_batch("jobs", None, immediate_jobs, None)
         .await?;
 
     println!(

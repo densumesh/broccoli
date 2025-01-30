@@ -101,15 +101,26 @@ impl Broker for RedisBroker {
     ///
     /// # Returns
     /// A `Result` indicating success or failure.
-    #[cfg(not(feature = "fairness"))]
     async fn publish(
         &self,
         queue_name: &str,
+        disambiguator: Option<String>,
         messages: &[InternalBrokerMessage],
         publish_options: Option<PublishOptions>,
     ) -> Result<Vec<InternalBrokerMessage>, BroccoliError> {
         let redis_pool = self.ensure_pool()?;
         let mut redis_connection = get_redis_connection(&redis_pool).await?;
+        let enable_fairness = self
+            .config
+            .as_ref()
+            .map(|config| config.enable_fairness.unwrap_or(false))
+            .unwrap_or(false);
+
+        if enable_fairness && disambiguator.is_none() {
+            return Err(BroccoliError::Broker(
+                "Disambiguator required for fairness queue".to_string(),
+            ));
+        }
 
         for msg in messages {
             let attempts = msg.attempts.to_string();
@@ -127,12 +138,16 @@ impl Broker for RedisBroker {
             }
 
             let priority_str = priority.to_string();
-            let items: Vec<(&str, &str)> = vec![
+            let mut items: Vec<(&str, &str)> = vec![
                 ("task_id", &msg.task_id),
                 ("payload", &msg.payload),
                 ("attempts", &attempts),
                 ("priority", &priority_str),
             ];
+
+            if let Some(ref disambiguator) = disambiguator {
+                items.push(("disambiguator", disambiguator));
+            }
 
             let mut score = time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64;
 
@@ -173,115 +188,45 @@ impl Broker for RedisBroker {
                 }
             }
 
+            let queue_name = if let Some(ref disambiguator) = disambiguator {
+                format!("{}_{}_queue", queue_name, disambiguator)
+            } else {
+                queue_name.to_string()
+            };
+
             redis_connection
                 .zadd::<String, i64, &str, String>(
-                    queue_name.to_string(),
+                    queue_name,
                     &msg.task_id.to_string(),
                     priority * score,
                 )
                 .await?;
         }
 
-        Ok(messages.to_vec())
-    }
+        if enable_fairness {
+            if let Some(ref disambiguator) = disambiguator {
+                let exists_in_tracking_set = redis_connection
+                    .sismember::<String, &str, bool>(
+                        format!("{}_fairness_set", queue_name),
+                        disambiguator,
+                    )
+                    .await?;
 
-    #[cfg(feature = "fairness")]
-    async fn publish(
-        &self,
-        queue_name: &str,
-        disambiguator: String,
-        messages: &[InternalBrokerMessage],
-        publish_options: Option<PublishOptions>,
-    ) -> Result<Vec<InternalBrokerMessage>, BroccoliError> {
-        let redis_pool = self.ensure_pool()?;
-        let mut redis_connection = get_redis_connection(&redis_pool).await?;
-
-        for msg in messages {
-            let attempts = msg.attempts.to_string();
-
-            let priority = publish_options
-                .clone()
-                .unwrap_or_default()
-                .priority
-                .unwrap_or(5) as i64;
-
-            if !(1..=5).contains(&priority) {
-                return Err(BroccoliError::Broker(
-                    "Priority must be between 1 and 5".to_string(),
-                ));
-            }
-
-            let priority_str = priority.to_string();
-            let items: Vec<(&str, &str)> = vec![
-                ("task_id", &msg.task_id),
-                ("payload", &msg.payload),
-                ("attempts", &attempts),
-                ("priority", &priority_str),
-                ("disambiguator", &disambiguator),
-            ];
-
-            let mut score = time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64;
-
-            redis_connection
-                .hset_multiple::<&str, &str, &str, String>(&msg.task_id.to_string(), &items)
-                .await?;
-
-            if let Some(ref publish_options) = publish_options {
-                if let Some(delay) = publish_options.delay {
-                    if self
-                        .config
-                        .as_ref()
-                        .map(|c| c.enable_scheduling.unwrap_or(false))
-                        .unwrap_or(false)
-                    {
-                        score += (delay.as_seconds_f32() * 1_000_000_000.0) as i64;
-                    }
-                }
-
-                if let Some(timestamp) = publish_options.scheduled_at {
-                    if self
-                        .config
-                        .as_ref()
-                        .map(|c| c.enable_scheduling.unwrap_or(false))
-                        .unwrap_or(false)
-                    {
-                        score = timestamp.unix_timestamp_nanos() as i64;
-                    }
-                }
-
-                if let Some(ttl) = publish_options.ttl {
+                if !exists_in_tracking_set {
                     redis_connection
-                        .pexpire::<&str, String>(
-                            &msg.task_id.to_string(),
-                            (ttl.as_seconds_f64() * 1000.0) as i64,
+                        .sadd::<String, &str, ()>(
+                            format!("{}_fairness_set", queue_name),
+                            disambiguator,
+                        )
+                        .await?;
+                    redis_connection
+                        .rpush::<String, &str, ()>(
+                            format!("{}_fairness_round_robin", queue_name),
+                            disambiguator,
                         )
                         .await?;
                 }
             }
-
-            redis_connection
-                .zadd::<String, i64, &str, String>(
-                    format!("{}_{}_queue", queue_name, disambiguator),
-                    &msg.task_id.to_string(),
-                    priority * score,
-                )
-                .await?;
-        }
-
-        let exists_in_tracking_set = redis_connection
-            .sismember::<String, &str, bool>(format!("{}_fairness_set", queue_name), &disambiguator)
-            .await?;
-
-        if !exists_in_tracking_set {
-            redis_connection
-                .sadd::<String, &str, ()>(format!("{}_fairness_set", queue_name), &disambiguator)
-                .await?;
-            redis_connection
-                .rpush::<String, &str, ()>(
-                    format!("{}_fairness_round_robin", queue_name),
-                    &disambiguator,
-                )
-                .await?;
         }
 
         Ok(messages.to_vec())
@@ -390,11 +335,9 @@ impl Broker for RedisBroker {
     async fn reject(
         &self,
         queue_name: &str,
-        #[cfg(feature = "fairness")] disambiguator: String,
         message: InternalBrokerMessage,
     ) -> Result<(), BroccoliError> {
         let redis_pool = self.ensure_pool()?;
-
         let mut redis_connection = get_redis_connection(&redis_pool).await?;
 
         let attempts = message.attempts + 1;
@@ -449,8 +392,7 @@ impl Broker for RedisBroker {
 
             self.publish(
                 queue_name,
-                #[cfg(feature = "fairness")]
-                disambiguator,
+                message.disambiguator.clone(),
                 &[message.clone()],
                 Some(PublishOptions {
                     priority: Some(priority as u8),

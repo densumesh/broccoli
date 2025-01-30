@@ -28,7 +28,8 @@ pub trait Broker: Send + Sync {
     async fn publish(
         &self,
         queue_name: &str,
-        #[cfg(feature = "fairness")] disambiguator: String,
+        disambiguator: Option<String>,
+
         message: &[InternalBrokerMessage],
         options: Option<PublishOptions>,
     ) -> Result<Vec<InternalBrokerMessage>, BroccoliError>;
@@ -85,7 +86,6 @@ pub trait Broker: Send + Sync {
     async fn reject(
         &self,
         queue_name: &str,
-        #[cfg(feature = "fairness")] disambiguator: String,
         message: InternalBrokerMessage,
     ) -> Result<(), BroccoliError>;
 
@@ -113,6 +113,8 @@ pub struct BrokerConfig {
     /// NOTE: If you enable this w/ rabbitmq, you will need to install the delayed-exchange plugin
     /// https://www.rabbitmq.com/blog/2015/04/16/scheduling-messages-with-rabbitmq
     pub enable_scheduling: Option<bool>,
+    /// Whether to enable fair queueing
+    pub enable_fairness: Option<bool>,
 }
 
 impl Default for BrokerConfig {
@@ -122,6 +124,7 @@ impl Default for BrokerConfig {
             retry_failed: Some(true),
             pool_connections: Some(10),
             enable_scheduling: Some(false),
+            enable_fairness: Some(false),
         }
     }
 }
@@ -138,9 +141,8 @@ pub struct BrokerMessage<T: Clone + serde::Serialize> {
     pub payload: T,
     /// Number of processing attempts made
     pub attempts: u8,
-    #[cfg(feature = "fairness")]
     /// Disambiguator for message fairness
-    pub disambiguator: String,
+    pub disambiguator: Option<String>,
     /// Additional metadata for the message
     #[serde(skip)]
     pub(crate) metadata: Option<HashMap<String, MetadataTypes>>,
@@ -148,12 +150,11 @@ pub struct BrokerMessage<T: Clone + serde::Serialize> {
 
 impl<T: Clone + serde::Serialize> BrokerMessage<T> {
     /// Creates a new `BrokerMessage` with the provided payload.
-    pub fn new(payload: T, #[cfg(feature = "fairness")] disambiguator: String) -> Self {
+    pub fn new(payload: T, disambiguator: Option<String>) -> Self {
         BrokerMessage {
             task_id: uuid::Uuid::new_v4(),
             payload,
             attempts: 0,
-            #[cfg(feature = "fairness")]
             disambiguator,
             metadata: None,
         }
@@ -175,9 +176,8 @@ pub struct InternalBrokerMessage {
     pub payload: String,
     /// Number of processing attempts made
     pub attempts: u8,
-    #[cfg(feature = "fairness")]
     /// Disambiguator for message fairness
-    pub disambiguator: String,
+    pub disambiguator: Option<String>,
     /// Additional metadata for the message
     #[serde(skip)]
     pub(crate) metadata: Option<HashMap<String, MetadataTypes>>,
@@ -189,13 +189,12 @@ impl InternalBrokerMessage {
         task_id: String,
         payload: String,
         attempts: u8,
-        #[cfg(feature = "fairness")] disambiguator: String,
+        disambiguator: Option<String>,
     ) -> Self {
         InternalBrokerMessage {
             task_id,
             payload,
             attempts,
-            #[cfg(feature = "fairness")]
             disambiguator,
             metadata: None,
         }
@@ -208,7 +207,6 @@ impl<T: Clone + serde::Serialize> From<BrokerMessage<T>> for InternalBrokerMessa
             task_id: msg.task_id.to_string(),
             payload: serde_json::to_string(&msg.payload).unwrap_or_default(),
             attempts: msg.attempts,
-            #[cfg(feature = "fairness")]
             disambiguator: msg.disambiguator,
             metadata: msg.metadata,
         }
@@ -221,7 +219,6 @@ impl<T: Clone + serde::Serialize> From<&BrokerMessage<T>> for InternalBrokerMess
             task_id: msg.task_id.to_string(),
             payload: serde_json::to_string(&msg.payload).unwrap_or_default(),
             attempts: msg.attempts,
-            #[cfg(feature = "fairness")]
             disambiguator: msg.disambiguator.clone(),
             metadata: msg.metadata.clone(),
         }
@@ -239,7 +236,6 @@ impl InternalBrokerMessage {
                 BroccoliError::Broker(format!("Failed to parse message payload: {}", e))
             })?,
             attempts: self.attempts,
-            #[cfg(feature = "fairness")]
             disambiguator: self.disambiguator.clone(),
             metadata: self.metadata.clone(),
         })

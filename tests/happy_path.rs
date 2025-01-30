@@ -13,7 +13,10 @@ struct TestMessage {
 
 #[tokio::test]
 async fn test_publish_and_consume() {
+    #[cfg(not(feature = "test-fairness"))]
     let queue = common::setup_queue().await;
+    #[cfg(feature = "test-fairness")]
+    let queue = common::setup_fair_queue().await;
     let test_topic = "test_publish_topic";
 
     // Test message
@@ -23,14 +26,14 @@ async fn test_publish_and_consume() {
     };
 
     // Publish message
-    #[cfg(not(feature = "fairness"))]
+    #[cfg(not(feature = "test-fairness"))]
     let published = queue
-        .publish(test_topic, &message, None)
+        .publish(test_topic, None, &message, None)
         .await
         .expect("Failed to publish message");
-    #[cfg(feature = "fairness")]
+    #[cfg(feature = "test-fairness")]
     let published = queue
-        .publish(test_topic, String::from("job-1"), &message, None)
+        .publish(test_topic, Some(String::from("job-1")), &message, None)
         .await
         .expect("Failed to publish message");
 
@@ -46,7 +49,10 @@ async fn test_publish_and_consume() {
 
 #[tokio::test]
 async fn test_batch_publish_and_consume() {
+    #[cfg(not(feature = "test-fairness"))]
     let queue = common::setup_queue().await;
+    #[cfg(feature = "test-fairness")]
+    let queue = common::setup_fair_queue().await;
     let test_topic = "test_batch_topic";
 
     // Test messages
@@ -62,14 +68,19 @@ async fn test_batch_publish_and_consume() {
     ];
 
     // Publish batch
-    #[cfg(not(feature = "fairness"))]
+    #[cfg(not(feature = "test-fairness"))]
     let published = queue
-        .publish_batch(test_topic, messages.clone(), None)
+        .publish_batch(test_topic, None, messages.clone(), None)
         .await
         .expect("Failed to publish batch");
-    #[cfg(feature = "fairness")]
+    #[cfg(feature = "test-fairness")]
     let published = queue
-        .publish_batch(test_topic, String::from("job-1"), messages.clone(), None)
+        .publish_batch(
+            test_topic,
+            Some(String::from("job-1")),
+            messages.clone(),
+            None,
+        )
         .await
         .expect("Failed to publish batch");
 
@@ -86,7 +97,10 @@ async fn test_batch_publish_and_consume() {
 
 #[tokio::test]
 async fn test_delayed_message() {
+    #[cfg(not(feature = "test-fairness"))]
     let queue = common::setup_queue().await;
+    #[cfg(feature = "test-fairness")]
+    let queue = common::setup_fair_queue().await;
     let test_topic = "test_delayed_topic";
 
     let message = TestMessage {
@@ -99,14 +113,19 @@ async fn test_delayed_message() {
         .delay(time::Duration::seconds(2))
         .build();
 
-    #[cfg(not(feature = "fairness"))]
+    #[cfg(not(feature = "test-fairness"))]
     queue
-        .publish(test_topic, &message, Some(options))
+        .publish(test_topic, None, &message, Some(options))
         .await
         .expect("Failed to publish delayed message");
-    #[cfg(feature = "fairness")]
+    #[cfg(feature = "test-fairness")]
     queue
-        .publish(test_topic, String::from("job-1"), &message, Some(options))
+        .publish(
+            test_topic,
+            Some(String::from("job-1")),
+            &message,
+            Some(options),
+        )
         .await
         .expect("Failed to publish delayed message");
 
@@ -131,7 +150,10 @@ async fn test_delayed_message() {
 
 #[tokio::test]
 async fn test_scheduled_message() {
+    #[cfg(not(feature = "test-fairness"))]
     let queue = common::setup_queue().await;
+    #[cfg(feature = "test-fairness")]
+    let queue = common::setup_fair_queue().await;
     let test_topic = "test_scheduled_topic";
 
     let message = TestMessage {
@@ -143,14 +165,19 @@ async fn test_scheduled_message() {
     let schedule_time = time::OffsetDateTime::now_utc() + time::Duration::seconds(2);
     let options = PublishOptions::builder().schedule_at(schedule_time).build();
 
-    #[cfg(not(feature = "fairness"))]
+    #[cfg(not(feature = "test-fairness"))]
     let published = queue
-        .publish(test_topic, &message, Some(options))
+        .publish(test_topic, None, &message, Some(options))
         .await
         .expect("Failed to publish scheduled message");
-    #[cfg(feature = "fairness")]
+    #[cfg(feature = "test-fairness")]
     let published = queue
-        .publish(test_topic, String::from("job-1"), &message, Some(options))
+        .publish(
+            test_topic,
+            Some(String::from("job-1")),
+            &message,
+            Some(options),
+        )
         .await
         .expect("Failed to publish scheduled message");
 
@@ -176,7 +203,10 @@ async fn test_scheduled_message() {
 
 #[tokio::test]
 async fn test_message_retry() {
+    #[cfg(not(feature = "test-fairness"))]
     let queue = common::setup_queue().await;
+    #[cfg(feature = "test-fairness")]
+    let queue = common::setup_fair_queue().await;
     let test_topic = "test_retry_topic";
 
     let message = TestMessage {
@@ -185,14 +215,14 @@ async fn test_message_retry() {
     };
 
     // Publish message
-    #[cfg(not(feature = "fairness"))]
+    #[cfg(not(feature = "test-fairness"))]
     queue
-        .publish(test_topic, &message, None)
+        .publish(test_topic, None, &message, None)
         .await
         .expect("Failed to publish message");
-    #[cfg(feature = "fairness")]
+    #[cfg(feature = "test-fairness")]
     queue
-        .publish(test_topic, String::from("job-1"), &message, None)
+        .publish(test_topic, Some(String::from("job-1")), &message, None)
         .await
         .expect("Failed to publish message");
 
@@ -204,14 +234,8 @@ async fn test_message_retry() {
             .expect("Failed to consume message");
 
         // Reject the message
-        #[cfg(not(feature = "fairness"))]
         queue
             .reject(test_topic, consumed)
-            .await
-            .expect("Failed to reject message");
-        #[cfg(feature = "fairness")]
-        queue
-            .reject(test_topic, String::from("job-1"), consumed)
             .await
             .expect("Failed to reject message");
     }
@@ -226,7 +250,10 @@ async fn test_message_retry() {
 
 #[tokio::test]
 async fn test_message_acknowledgment() {
+    #[cfg(not(feature = "test-fairness"))]
     let queue = common::setup_queue().await;
+    #[cfg(feature = "test-fairness")]
+    let queue = common::setup_fair_queue().await;
     let test_topic = "test_ack_topic";
 
     let message = TestMessage {
@@ -235,14 +262,14 @@ async fn test_message_acknowledgment() {
     };
 
     // Publish message
-    #[cfg(not(feature = "fairness"))]
+    #[cfg(not(feature = "test-fairness"))]
     queue
-        .publish(test_topic, &message, None)
+        .publish(test_topic, None, &message, None)
         .await
         .expect("Failed to publish message");
-    #[cfg(feature = "fairness")]
+    #[cfg(feature = "test-fairness")]
     queue
-        .publish(test_topic, String::from("job-1"), &message, None)
+        .publish(test_topic, Some(String::from("job-1")), &message, None)
         .await
         .expect("Failed to publish message");
 
@@ -267,7 +294,10 @@ async fn test_message_acknowledgment() {
 
 #[tokio::test]
 async fn test_message_auto_ack() {
+    #[cfg(not(feature = "test-fairness"))]
     let queue = common::setup_queue().await;
+    #[cfg(feature = "test-fairness")]
+    let queue = common::setup_fair_queue().await;
     let test_topic = "test_auto_ack_topic";
 
     let message = TestMessage {
@@ -276,14 +306,14 @@ async fn test_message_auto_ack() {
     };
 
     // Publish message
-    #[cfg(not(feature = "fairness"))]
+    #[cfg(not(feature = "test-fairness"))]
     queue
-        .publish(test_topic, &message, None)
+        .publish(test_topic, None, &message, None)
         .await
         .expect("Failed to publish message");
-    #[cfg(feature = "fairness")]
+    #[cfg(feature = "test-fairness")]
     queue
-        .publish(test_topic, String::from("job-1"), &message, None)
+        .publish(test_topic, Some(String::from("job-1")), &message, None)
         .await
         .expect("Failed to publish message");
 
@@ -303,7 +333,10 @@ async fn test_message_auto_ack() {
 
 #[tokio::test]
 async fn test_message_cancellation() {
+    #[cfg(not(feature = "test-fairness"))]
     let queue = common::setup_queue().await;
+    #[cfg(feature = "test-fairness")]
+    let queue = common::setup_fair_queue().await;
     let test_topic = "test_cancel_topic";
 
     let message = TestMessage {
@@ -312,14 +345,14 @@ async fn test_message_cancellation() {
     };
 
     // Publish message
-    #[cfg(not(feature = "fairness"))]
+    #[cfg(not(feature = "test-fairness"))]
     let published = queue
-        .publish(test_topic, &message, None)
+        .publish(test_topic, None, &message, None)
         .await
         .expect("Failed to publish message");
-    #[cfg(feature = "fairness")]
+    #[cfg(feature = "test-fairness")]
     let published = queue
-        .publish(test_topic, String::from("job-1"), &message, None)
+        .publish(test_topic, Some(String::from("job-1")), &message, None)
         .await
         .expect("Failed to publish message");
     // Cancel the message
@@ -348,7 +381,10 @@ async fn test_message_cancellation() {
 
 #[tokio::test]
 async fn test_message_priority() {
+    #[cfg(not(feature = "test-fairness"))]
     let queue = common::setup_queue().await;
+    #[cfg(feature = "test-fairness")]
+    let queue = common::setup_fair_queue().await;
     let test_topic = "test_priority_topic";
 
     // Create messages with different priorities
@@ -372,48 +408,48 @@ async fn test_message_priority() {
     let options_high = PublishOptions::builder().priority(1).build();
     let options_medium = PublishOptions::builder().priority(3).build();
 
-    #[cfg(not(feature = "fairness"))]
+    #[cfg(not(feature = "test-fairness"))]
     queue
-        .publish(test_topic, &messages[0], Some(options_low))
+        .publish(test_topic, None, &messages[0], Some(options_low))
         .await
         .expect("Failed to publish low priority message");
-    #[cfg(feature = "fairness")]
+    #[cfg(feature = "test-fairness")]
     queue
         .publish(
             test_topic,
-            String::from("job-1"),
+            Some(String::from("job-1")),
             &messages[0],
             Some(options_low),
         )
         .await
         .expect("Failed to publish low priority message");
 
-    #[cfg(not(feature = "fairness"))]
+    #[cfg(not(feature = "test-fairness"))]
     queue
-        .publish(test_topic, &messages[1], Some(options_high))
+        .publish(test_topic, None, &messages[1], Some(options_high))
         .await
         .expect("Failed to publish high priority message");
-    #[cfg(feature = "fairness")]
+    #[cfg(feature = "test-fairness")]
     queue
         .publish(
             test_topic,
-            String::from("job-1"),
+            Some(String::from("job-1")),
             &messages[1],
             Some(options_high),
         )
         .await
         .expect("Failed to publish high priority message");
 
-    #[cfg(not(feature = "fairness"))]
+    #[cfg(not(feature = "test-fairness"))]
     queue
-        .publish(test_topic, &messages[2], Some(options_medium))
+        .publish(test_topic, None, &messages[2], Some(options_medium))
         .await
         .expect("Failed to publish medium priority message");
-    #[cfg(feature = "fairness")]
+    #[cfg(feature = "test-fairness")]
     queue
         .publish(
             test_topic,
-            String::from("job-1"),
+            Some(String::from("job-1")),
             &messages[2],
             Some(options_medium),
         )

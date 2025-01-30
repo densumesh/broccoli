@@ -1,19 +1,23 @@
+#[cfg(all(feature = "redis", feature = "test-fairness"))]
 use broccoli_queue::queue::PublishOptions;
+#[cfg(all(feature = "redis", feature = "test-fairness"))]
 use serde::{Deserialize, Serialize};
+#[cfg(all(feature = "redis", feature = "test-fairness"))]
 use time::Duration;
 
 mod common;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg(all(feature = "redis", feature = "test-fairness"))]
 struct TestMessage {
     id: String,
     content: String,
 }
 
 #[tokio::test]
-#[cfg(all(feature = "redis", feature = "fairness"))]
+#[cfg(all(feature = "redis", feature = "test-fairness"))]
 async fn test_fairness_round_robin() {
-    let queue = common::setup_queue().await;
+    let queue = common::setup_fair_queue().await;
     let test_topic = "test_fairness_topic";
 
     // Publish messages from different jobs
@@ -32,7 +36,7 @@ async fn test_fairness_round_robin() {
             content: content.to_string(),
         };
         queue
-            .publish(test_topic, job_id.to_string(), &message, None)
+            .publish(test_topic, Some(String::from(job_id)), &message, None)
             .await
             .expect("Failed to publish message");
     }
@@ -61,9 +65,9 @@ async fn test_fairness_round_robin() {
 }
 
 #[tokio::test]
-#[cfg(all(feature = "redis", feature = "fairness"))]
+#[cfg(all(feature = "redis", feature = "test-fairness"))]
 async fn test_fairness_with_priorities() {
-    let queue = common::setup_queue().await;
+    let queue = common::setup_fair_queue().await;
     let test_topic = "test_fairness_priority_topic";
 
     // Publish messages with different priorities from different jobs
@@ -81,7 +85,12 @@ async fn test_fairness_with_priorities() {
         };
         let options = PublishOptions::builder().priority(priority).build();
         queue
-            .publish(test_topic, job_id.to_string(), &message, Some(options))
+            .publish(
+                test_topic,
+                Some(String::from(job_id)),
+                &message,
+                Some(options),
+            )
             .await
             .expect("Failed to publish message");
     }
@@ -114,9 +123,9 @@ async fn test_fairness_with_priorities() {
 }
 
 #[tokio::test]
-#[cfg(all(feature = "redis", feature = "fairness"))]
+#[cfg(all(feature = "redis", feature = "test-fairness"))]
 async fn test_fairness_with_delayed_messages() {
-    let queue = common::setup_queue().await;
+    let queue = common::setup_fair_queue().await;
     let test_topic = "test_fairness_delay_topic";
 
     // Publish immediate and delayed messages from different jobs
@@ -125,7 +134,12 @@ async fn test_fairness_with_delayed_messages() {
         content: "immediate from job 1".to_string(),
     };
     queue
-        .publish(test_topic, "job-1".to_string(), &immediate_msg, None)
+        .publish(
+            test_topic,
+            Some(String::from("job-1")),
+            &immediate_msg,
+            None,
+        )
         .await
         .expect("Failed to publish immediate message");
 
@@ -137,7 +151,12 @@ async fn test_fairness_with_delayed_messages() {
         .delay(Duration::seconds(2))
         .build();
     queue
-        .publish(test_topic, "job-2".to_string(), &delayed_msg, Some(options))
+        .publish(
+            test_topic,
+            Some(String::from("job-2")),
+            &delayed_msg,
+            Some(options),
+        )
         .await
         .expect("Failed to publish delayed message");
 
@@ -168,9 +187,9 @@ async fn test_fairness_with_delayed_messages() {
 }
 
 #[tokio::test]
-#[cfg(all(feature = "redis", feature = "fairness"))]
+#[cfg(all(feature = "redis", feature = "test-fairness"))]
 async fn test_fairness_with_retries() {
-    let queue = common::setup_queue().await;
+    let queue = common::setup_fair_queue().await;
     let test_topic = "test_fairness_retry_topic";
 
     // Publish messages from different jobs
@@ -185,7 +204,7 @@ async fn test_fairness_with_retries() {
             content: content.to_string(),
         };
         queue
-            .publish(test_topic, job_id.to_string(), &message, None)
+            .publish(test_topic, Some(String::from(job_id)), &message, None)
             .await
             .expect("Failed to publish message");
     }
@@ -198,7 +217,7 @@ async fn test_fairness_with_retries() {
                 .await
                 .expect("Failed to consume message");
             queue
-                .reject(test_topic, msg.payload.id.clone(), msg)
+                .reject(test_topic, msg)
                 .await
                 .expect("Failed to reject message");
         }

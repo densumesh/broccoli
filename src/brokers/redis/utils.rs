@@ -49,49 +49,19 @@ impl RedisBroker {
         }
     }
 
-    #[cfg(not(feature = "fairness"))]
     pub(crate) async fn get_task_id(
         &self,
         queue_name: &str,
         redis_connection: &mut RedisConnection<'_>,
         options: Option<ConsumeOptions>,
     ) -> Result<Option<String>, BroccoliError> {
-        let popped_message: Option<(String, f64)> = redis_connection
-            .zpopmin::<&str, Vec<(String, f64)>>(queue_name, 1)
-            .await?
-            .first()
-            .cloned();
-
-        if let Some((message, score)) = &popped_message {
-            if score > &(5.0 * time::OffsetDateTime::now_utc().unix_timestamp_nanos() as f64) {
-                redis_connection
-                    .zadd::<&str, f64, String, ()>(queue_name, message.clone(), *score)
-                    .await?;
-                return Ok(None);
-            }
-        }
-
-        if options.is_some_and(|x| x.auto_ack.unwrap_or(false)) {
-            Ok(popped_message.map(|(popped_message, _)| popped_message))
-        } else if let Some((popped_message, _)) = popped_message {
-            redis_connection
-                .lpush::<String, &String, ()>(format!("{}_processing", queue_name), &popped_message)
-                .await?;
-            Ok(Some(popped_message))
-        } else {
-            Ok(None)
-        }
-    }
-
-    #[cfg(feature = "fairness")]
-    pub(crate) async fn get_task_id(
-        &self,
-        queue_name: &str,
-        redis_connection: &mut RedisConnection<'_>,
-        options: Option<ConsumeOptions>,
-    ) -> Result<Option<String>, BroccoliError> {
-        let script = redis::Script::new(
-            r#"
+        let popped_message: Option<String> = if self
+            .config
+            .as_ref()
+            .is_some_and(|x| x.enable_fairness.unwrap_or(false))
+        {
+            let script = redis::Script::new(
+                r#"
             local current_time = tonumber(ARGV[1])
             local queue_to_process = redis.call('LPOP', KEYS[1])
             if not queue_to_process then
@@ -121,15 +91,32 @@ impl RedisBroker {
 
             return message
         "#,
-        );
+            );
 
-        let popped_message: Option<String> = script
-            .arg(time::OffsetDateTime::now_utc().unix_timestamp_nanos() as f64)
-            .key(format!("{}_fairness_round_robin", queue_name))
-            .key(queue_name)
-            .key(format!("{}_fairness_set", queue_name))
-            .invoke_async(&mut **redis_connection)
-            .await?;
+            script
+                .arg(time::OffsetDateTime::now_utc().unix_timestamp_nanos() as f64)
+                .key(format!("{}_fairness_round_robin", queue_name))
+                .key(queue_name)
+                .key(format!("{}_fairness_set", queue_name))
+                .invoke_async(&mut **redis_connection)
+                .await?
+        } else {
+            let popped_message: Option<(String, f64)> = redis_connection
+                .zpopmin::<&str, Vec<(String, f64)>>(queue_name, 1)
+                .await?
+                .first()
+                .cloned();
+
+            if let Some((message, score)) = &popped_message {
+                if score > &(5.0 * time::OffsetDateTime::now_utc().unix_timestamp_nanos() as f64) {
+                    redis_connection
+                        .zadd::<&str, f64, String, ()>(queue_name, message.clone(), *score)
+                        .await?;
+                    return Ok(None);
+                }
+            }
+            (popped_message).map(|(popped_message, _)| popped_message)
+        };
 
         if options.is_some_and(|x| x.auto_ack.unwrap_or(false)) {
             Ok(popped_message)
@@ -169,10 +156,7 @@ impl FromRedisValue for OptionalInternalBrokerMessage {
             redis::RedisError::from((redis::ErrorKind::TypeError, "Missing field: priority"))
         })?;
 
-        #[cfg(feature = "fairness")]
-        let disambiguator = map.get("disambiguator").ok_or_else(|| {
-            redis::RedisError::from((redis::ErrorKind::TypeError, "Missing field: disambiguator"))
-        })?;
+        let disambiguator = map.get("disambiguator");
 
         let mut metadata = HashMap::new();
         metadata.insert(
@@ -184,8 +168,7 @@ impl FromRedisValue for OptionalInternalBrokerMessage {
             task_id: task_id.to_string(),
             payload: payload.to_string(),
             attempts: attempts.parse().unwrap_or_default(),
-            #[cfg(feature = "fairness")]
-            disambiguator: disambiguator.to_string(),
+            disambiguator: disambiguator.cloned(),
             metadata: Some(metadata),
         })))
     }

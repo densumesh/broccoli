@@ -90,6 +90,8 @@ pub struct BroccoliQueueBuilder {
     /// NOTE: If you enable this w/ rabbitmq, you will need to install the delayed-exchange plugin
     /// https://www.rabbitmq.com/blog/2015/04/16/scheduling-messages-with-rabbitmq
     enable_scheduling: Option<bool>,
+    /// Whether to enable fairness
+    enable_fairness: Option<bool>,
 }
 
 impl BroccoliQueueBuilder {
@@ -107,6 +109,7 @@ impl BroccoliQueueBuilder {
             retry_failed: None,
             pool_connections: None,
             enable_scheduling: None,
+            enable_fairness: None,
         }
     }
 
@@ -150,6 +153,18 @@ impl BroccoliQueueBuilder {
         self
     }
 
+    /// Enables or disables fairness.
+    ///
+    /// # Arguments
+    /// * `enable_fairness` - If true, fairness will be enabled.
+    ///
+    /// # Returns
+    /// The updated `BroccoliQueueBuilder` instance.
+    pub fn enable_fairness(mut self, enable_fairness: bool) -> Self {
+        self.enable_fairness = Some(enable_fairness);
+        self
+    }
+
     /// Builds the `BroccoliQueue` with the specified configuration.
     ///
     /// # Returns
@@ -160,6 +175,7 @@ impl BroccoliQueueBuilder {
             retry_failed: self.retry_failed,
             pool_connections: self.pool_connections,
             enable_scheduling: self.enable_scheduling,
+            enable_fairness: self.enable_fairness,
         };
 
         let broker = connect_to_broker(&self.broker_url, Some(config))
@@ -339,25 +355,15 @@ impl BroccoliQueue {
     pub async fn publish<T: Clone + serde::Serialize + serde::de::DeserializeOwned>(
         &self,
         topic: &str,
-        #[cfg(feature = "fairness")] disambiguator: String,
+        disambiguator: Option<String>,
         message: &T,
         options: Option<PublishOptions>,
     ) -> Result<BrokerMessage<T>, BroccoliError> {
-        let message = BrokerMessage::new(
-            message.clone(),
-            #[cfg(feature = "fairness")]
-            disambiguator.clone(),
-        );
+        let message = BrokerMessage::new(message.clone(), disambiguator.clone());
 
         let message = self
             .broker
-            .publish(
-                topic,
-                #[cfg(feature = "fairness")]
-                disambiguator,
-                &[message.into()],
-                options,
-            )
+            .publish(topic, disambiguator, &[message.into()], options)
             .await
             .map_err(|e| BroccoliError::Publish(format!("Failed to publish message: {:?}", e)))?
             .pop()
@@ -379,19 +385,13 @@ impl BroccoliQueue {
     pub async fn publish_batch<T: Clone + serde::Serialize + serde::de::DeserializeOwned>(
         &self,
         topic: &str,
-        #[cfg(feature = "fairness")] disambiguator: String,
+        disambiguator: Option<String>,
         messages: impl IntoIterator<Item = T>,
         options: Option<PublishOptions>,
     ) -> Result<Vec<BrokerMessage<T>>, BroccoliError> {
         let messages: Vec<BrokerMessage<T>> = messages
             .into_iter()
-            .map(|msg| {
-                BrokerMessage::new(
-                    msg,
-                    #[cfg(feature = "fairness")]
-                    disambiguator.clone(),
-                )
-            })
+            .map(|msg| BrokerMessage::new(msg, disambiguator.clone()))
             .collect();
 
         let internal_messages = messages
@@ -401,13 +401,7 @@ impl BroccoliQueue {
 
         let messages = self
             .broker
-            .publish(
-                topic,
-                #[cfg(feature = "fairness")]
-                disambiguator,
-                &internal_messages,
-                options,
-            )
+            .publish(topic, disambiguator, &internal_messages, options)
             .await
             .map_err(|e| BroccoliError::Publish(format!("Failed to publish messages: {:?}", e)))?;
 
@@ -529,16 +523,10 @@ impl BroccoliQueue {
     pub async fn reject<T: Clone + serde::Serialize + serde::de::DeserializeOwned>(
         &self,
         topic: &str,
-        #[cfg(feature = "fairness")] disambiguator: String,
         message: BrokerMessage<T>,
     ) -> Result<(), BroccoliError> {
         self.broker
-            .reject(
-                topic,
-                #[cfg(feature = "fairness")]
-                disambiguator,
-                message.into(),
-            )
+            .reject(topic, message.into())
             .await
             .map_err(|e| BroccoliError::Reject(format!("Failed to reject message: {:?}", e)))?;
 
@@ -652,17 +640,9 @@ impl BroccoliQueue {
                                     }
                                     Err(_) => {
                                         // Message processing failed
-                                        let _ = broker
-                                            .reject(
-                                                &topic,
-                                                #[cfg(feature = "fairness")]
-                                                message.disambiguator.clone(),
-                                                message,
-                                            )
-                                            .await
-                                            .map_err(|e| {
-                                                log::error!("Failed to reject message: {:?}", e);
-                                            });
+                                        let _ = broker.reject(&topic, message).await.map_err(|e| {
+                                            log::error!("Failed to reject message: {:?}", e);
+                                        });
                                     }
                                 }
                             } else {
@@ -693,18 +673,9 @@ impl BroccoliQueue {
                     }
                     Err(_) => {
                         // Message processing failed
-                        let _ = self
-                            .broker
-                            .reject(
-                                topic,
-                                #[cfg(feature = "fairness")]
-                                message.disambiguator.clone(),
-                                message,
-                            )
-                            .await
-                            .map_err(|e| {
-                                log::error!("Failed to reject message: {:?}", e);
-                            });
+                        let _ = self.broker.reject(topic, message).await.map_err(|e| {
+                            log::error!("Failed to reject message: {:?}", e);
+                        });
                     }
                 }
             }
@@ -838,17 +809,9 @@ impl BroccoliQueue {
                                         let _ = on_error(broker_message, e).await.map_err(|e| {
                                             log::error!("Error Handler to process message: {:?}", e)
                                         });
-                                        let _ = broker
-                                            .reject(
-                                                &topic,
-                                                #[cfg(feature = "fairness")]
-                                                message.disambiguator.clone(),
-                                                message,
-                                            )
-                                            .await
-                                            .map_err(|e| {
-                                                log::error!("Failed to reject message: {:?}", e)
-                                            });
+                                        let _ = broker.reject(&topic, message).await.map_err(|e| {
+                                            log::error!("Failed to reject message: {:?}", e)
+                                        });
                                     }
                                 }
                             } else {
@@ -887,12 +850,7 @@ impl BroccoliQueue {
                             .map_err(|e| log::error!("Error Handler to process message: {:?}", e));
                         let _ = self
                             .broker
-                            .reject(
-                                topic,
-                                #[cfg(feature = "fairness")]
-                                message.disambiguator.clone(),
-                                message,
-                            )
+                            .reject(topic, message)
                             .await
                             .map_err(|e| log::error!("Failed to reject message: {:?}", e));
                     }
