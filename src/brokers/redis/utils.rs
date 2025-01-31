@@ -55,7 +55,7 @@ impl RedisBroker {
         redis_connection: &mut RedisConnection<'_>,
         options: Option<ConsumeOptions>,
     ) -> Result<Option<String>, BroccoliError> {
-        let popped_message: Option<String> = if self
+        let popped_message: Option<(String, String)> = if self
             .config
             .as_ref()
             .is_some_and(|x| x.enable_fairness.unwrap_or(false))
@@ -89,7 +89,7 @@ impl RedisBroker {
             redis.call('SREM', KEYS[3], queue_to_process)
             end
 
-            return message
+            return {message, queue_to_process}
         "#,
             );
 
@@ -115,14 +115,19 @@ impl RedisBroker {
                     return Ok(None);
                 }
             }
-            (popped_message).map(|(popped_message, _)| popped_message)
+            (popped_message).map(|(popped_message, _)| (popped_message, String::new()))
         };
 
         if options.is_some_and(|x| x.auto_ack.unwrap_or(false)) {
-            Ok(popped_message)
-        } else if let Some(popped_message) = popped_message {
+            Ok(popped_message.map(|(popped_message, _)| popped_message))
+        } else if let Some((popped_message, disambiguator)) = popped_message {
+            let processing_queue_name = if !disambiguator.is_empty() {
+                format!("{}_{}_processing", queue_name, disambiguator)
+            } else {
+                format!("{}_processing", queue_name)
+            };
             redis_connection
-                .lpush::<String, &String, ()>(format!("{}_processing", queue_name), &popped_message)
+                .lpush::<String, &String, ()>(processing_queue_name, &popped_message)
                 .await?;
             Ok(Some(popped_message))
         } else {

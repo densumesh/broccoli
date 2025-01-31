@@ -313,8 +313,14 @@ impl Broker for RedisBroker {
 
         let mut redis_connection = get_redis_connection(&redis_pool).await?;
 
+        let processing_queue_name = if let Some(ref disambiguator) = message.disambiguator {
+            format!("{}_{}_processing", queue_name, disambiguator)
+        } else {
+            format!("{}_processing", queue_name)
+        };
+
         redis_connection
-            .lrem::<String, &str, String>(format!("{}_processing", queue_name), 1, &message.task_id)
+            .lrem::<String, &str, String>(processing_queue_name, 1, &message.task_id)
             .await?;
 
         redis_connection
@@ -342,8 +348,14 @@ impl Broker for RedisBroker {
 
         let attempts = message.attempts + 1;
 
+        let processing_queue_name = if let Some(ref disambiguator) = message.disambiguator {
+            format!("{}_{}_processing", queue_name, disambiguator)
+        } else {
+            format!("{}_processing", queue_name)
+        };
+
         redis_connection
-            .lrem::<String, &str, String>(format!("{}_processing", queue_name), 1, &message.task_id)
+            .lrem::<String, &str, String>(processing_queue_name, 1, &message.task_id)
             .await?;
 
         if (attempts
@@ -358,8 +370,14 @@ impl Broker for RedisBroker {
                 .map(|config| config.retry_failed.unwrap_or(true))
                 .unwrap_or(true)
         {
+            let failed_queue_name = if let Some(ref disambiguator) = message.disambiguator {
+                format!("{}_{}_failed", queue_name, disambiguator)
+            } else {
+                format!("{}_failed", queue_name)
+            };
+
             redis_connection
-                .lpush::<String, &str, String>(format!("{}_failed", queue_name), &message.task_id)
+                .lpush::<String, &str, String>(failed_queue_name, &message.task_id)
                 .await?;
 
             log::error!(
