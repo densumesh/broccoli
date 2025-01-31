@@ -1,6 +1,6 @@
 [package]
 name = "broccoli_queue"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 description = "Broccoli is a simple, fast, and reliable job queue for Rust."
@@ -12,7 +12,7 @@ repository = "https://github.com/densumesh/broccoli"
 
 serde = { version = "1.0.216", features = ["derive"] }
 serde_json = "1.0.133"
-tokio = "1.42.0"
+tokio = { version = "1.42.0", features = ["full"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 async-trait = "0.1.83"
 thiserror = "2.0.7"
@@ -31,7 +31,6 @@ redis = { version = "0.27.5", features = [
 dashmap = "6.1.0"
 
 [dev-dependencies]
-tokio = { version = "1.42.0", features = ["full"] }
 chrono = { version = "0.4.39", features = ["serde"] }
 env_logger = "0.11.5"
 lazy_static = "1.4"
