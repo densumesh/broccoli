@@ -7,6 +7,8 @@ use crate::{
 use crate::brokers::rabbitmq::RabbitMQBroker;
 #[cfg(feature = "redis")]
 use crate::brokers::redis::RedisBroker;
+#[cfg(feature = "surrealdb")]
+use crate::brokers::surrealdb::SurrealDBBroker;
 
 /// Returns a boxed broker implementation based on the broker URL.
 ///
@@ -20,18 +22,25 @@ pub async fn connect_to_broker(
     broker_url: &str,
     config: Option<BrokerConfig>,
 ) -> Result<Box<dyn Broker>, BroccoliError> {
-    #[cfg(all(feature = "redis", feature = "rabbitmq"))]
+    #[cfg(all(feature = "redis", feature = "rabbitmq", feature = "surrealdb"))]
+    //TODO: add feature flag here
     let broker_type = if broker_url.starts_with("redis") {
         BrokerType::Redis
     } else if broker_url.starts_with("amqp") {
         BrokerType::RabbitMQ
+    } else if broker_url.starts_with("ws") {
+        BrokerType::SurrealDB
     } else {
         return Err(BroccoliError::Broker(
             "Unsupported broker URL scheme".to_string(),
         ));
     };
 
-    #[cfg(all(feature = "redis", not(feature = "rabbitmq")))]
+    #[cfg(all(
+        feature = "redis",
+        not(feature = "rabbitmq"),
+        not(feature = "surrealdb")
+    ))]
     let broker_type = if broker_url.starts_with("redis") {
         BrokerType::Redis
     } else {
@@ -40,9 +49,25 @@ pub async fn connect_to_broker(
         ));
     };
 
-    #[cfg(all(not(feature = "redis"), feature = "rabbitmq"))]
+    #[cfg(all(
+        feature = "rabbitmq",
+        not(feature = "redis"),
+        not(feature = "surrealdb")
+    ))]
     let broker_type = if broker_url.starts_with("amqp") {
         BrokerType::RabbitMQ
+    } else {
+        return Err(BroccoliError::Broker(
+            "Unsupported broker URL scheme".to_string(),
+        ));
+    };
+    #[cfg(all(
+        feature = "surrealdb",
+        not(feature = "redis"),
+        not(feature = "rabbitmq")
+    ))]
+    let broker_type = if broker_url.starts_with("ws") {
+        BrokerType::SurrealDB
     } else {
         return Err(BroccoliError::Broker(
             "Unsupported broker URL scheme".to_string(),
@@ -58,6 +83,11 @@ pub async fn connect_to_broker(
         BrokerType::RabbitMQ => Box::new(config.map_or_else(RabbitMQBroker::new, |config| {
             RabbitMQBroker::new_with_config(config)
         })),
+        #[cfg(feature = "surrealdb")]
+        BrokerType::SurrealDB => Box::new(match config {
+            Some(config) => SurrealDBBroker::new_with_config(config),
+            None => SurrealDBBroker::new(),
+        }),
     };
 
     broker.connect(broker_url).await?;
