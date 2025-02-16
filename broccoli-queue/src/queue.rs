@@ -5,6 +5,8 @@ use time::Duration;
 
 use time::OffsetDateTime;
 
+use crate::brokers::management::BrokerWithManagement;
+use crate::brokers::management::QueueManagement;
 use crate::{
     brokers::{
         broker::{Broker, BrokerConfig, BrokerMessage, InternalBrokerMessage},
@@ -344,7 +346,10 @@ impl PublishOptionsBuilder {
 /// as well as processing messages with custom handlers.
 pub struct BroccoliQueue {
     /// The underlying message broker implementation
+    #[cfg(not(feature = "management"))]
     broker: Arc<Box<dyn Broker>>,
+    #[cfg(feature = "management")]
+    broker: Arc<Box<dyn BrokerWithManagement>>,
 }
 
 impl Clone for BroccoliQueue {
@@ -918,5 +923,65 @@ impl BroccoliQueue {
                 }
             }
         }
+    }
+
+    /// Retrieves the status of the specified queue.
+    ///
+    /// # Arguments
+    /// * `queue_name` - The name of the queue.
+    ///
+    /// # Returns
+    /// A `Result` containing the status of the queue, or a `BroccoliError` on failure.
+    ///
+    /// # Errors
+    /// If the queue status fails to be retrieved, a `BroccoliError` will be returned.
+    #[cfg(feature = "management")]
+    pub async fn queue_status(&self, queue_name: &str) -> Result<QueueStatus, BroccoliError> {
+        self.broker
+            .get_queue_status(queue_name)
+            .await
+            .map_err(|e| BroccoliError::QueueStatus(format!("Failed to get queue status: {e:?}")))
+    }
+
+    /// Retrieves the status of the specified queue.
+    ///
+    /// # Arguments
+    /// * `queue_name` - The name of the queue.
+    /// * `disambiguator` - The disambiguator for the queue.
+    /// * `source_type` - The type of queue to retry from.
+    ///
+    /// # Returns
+    /// A `Result` containing the number of messages retried, or a `BroccoliError` on failure.
+    ///
+    /// # Errors
+    /// If the messages fail to be retried, a `BroccoliError` will be returned.
+    #[cfg(feature = "management")]
+    pub async fn retry_queue(
+        &self,
+        queue_name: &str,
+        disambiguator: Option<String>,
+        source_type: QueueType,
+    ) -> Result<usize, BroccoliError> {
+        self.broker
+            .retry_queue(queue_name, disambiguator, source_type)
+            .await
+            .map_err(|e| BroccoliError::Retry(format!("Failed to retry queue: {e:?}")))
+    }
+
+    /// Moves all messages from the failed queue back to the main queue for retrying.
+    ///
+    /// # Arguments
+    /// * `queue_name` - The name of the queue.
+    ///
+    /// # Returns
+    /// A `Result` containing the number of messages retried, or a `BroccoliError` on failure.
+    ///
+    /// # Errors
+    /// If the messages fail to be retried, a `BroccoliError` will be returned.
+    pub async fn retry_failed_queue(&self, queue_name: &str) -> Result<usize, BroccoliError> {
+        self.broker
+            .retry_failed_queue(queue_name)
+            .await
+            .map_err(|e| BroccoliError::Retry(format!("Failed to retry failed queue: {e:?}")))
     }
 }

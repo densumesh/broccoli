@@ -63,10 +63,7 @@ impl Broker for RabbitMQBroker {
             BroccoliError::Broker(format!("Failed to get connection from pool: {e}"))
         })?;
 
-        let channel = conn
-            .create_channel()
-            .await
-            .map_err(|e| BroccoliError::Broker(format!("Failed to create channel: {e}")))?;
+        let channel = conn.create_channel().await?;
 
         self.setup_exchange(&channel, "broccoli").await?;
 
@@ -87,10 +84,7 @@ impl Broker for RabbitMQBroker {
             BroccoliError::Broker(format!("Failed to get connection from pool: {e}"))
         })?;
 
-        let channel = conn
-            .create_channel()
-            .await
-            .map_err(|e| BroccoliError::Broker(format!("Failed to create channel: {e}")))?;
+        let channel = conn.create_channel().await?;
 
         self.setup_queue(&channel, queue_name).await?;
 
@@ -156,8 +150,7 @@ impl Broker for RabbitMQBroker {
                     message.payload.as_bytes(),
                     properties,
                 )
-                .await
-                .map_err(|e| BroccoliError::Publish(format!("Failed to publish message: {e}")))?;
+                .await?;
 
             published_messages.push(message.clone());
         }
@@ -175,10 +168,7 @@ impl Broker for RabbitMQBroker {
             BroccoliError::Broker(format!("Failed to get connection from pool: {e}"))
         })?;
 
-        let channel = conn
-            .create_channel()
-            .await
-            .map_err(|e| BroccoliError::Broker(format!("Failed to create channel: {e}")))?;
+        let channel = conn.create_channel().await?;
 
         self.setup_queue(&channel, queue_name).await?;
 
@@ -237,10 +227,7 @@ impl Broker for RabbitMQBroker {
             BroccoliError::Broker(format!("Failed to get connection from pool: {e}"))
         })?;
 
-        let channel = conn
-            .create_channel()
-            .await
-            .map_err(|e| BroccoliError::Broker(format!("Failed to create channel: {e}")))?;
+        let channel = conn.create_channel().await?;
 
         self.setup_queue(&channel, queue_name).await?;
         let auto_ack = options.is_some_and(|x| x.auto_ack.unwrap_or(false));
@@ -255,12 +242,10 @@ impl Broker for RabbitMQBroker {
                 },
                 FieldTable::default(),
             )
-            .await
-            .map_err(|e| BroccoliError::Consume(format!("Failed to create consumer: {e}")))?;
+            .await?;
 
         if let Some(delivery) = consumer.next().await {
-            let delivery = delivery
-                .map_err(|e| BroccoliError::Consume(format!("Failed to receive delivery: {e}")))?;
+            let delivery = delivery?;
 
             let task_id = delivery
                 .properties
@@ -326,10 +311,7 @@ impl Broker for RabbitMQBroker {
 
         channel
             .basic_ack(delivery_tag, BasicAckOptions::default())
-            .await
-            .map_err(|e| {
-                BroccoliError::Acknowledge(format!("Failed to acknowledge message: {e}"))
-            })?;
+            .await?;
 
         Ok(())
     }
@@ -364,8 +346,7 @@ impl Broker for RabbitMQBroker {
 
         channel
             .basic_reject(delivery_tag, BasicRejectOptions::default())
-            .await
-            .map_err(|e| BroccoliError::Cancel(format!("Failed to cancel message: {e}")))?;
+            .await?;
         if message.attempts < 3 {
             self.publish(queue_name, None, &[message], None).await?;
         }

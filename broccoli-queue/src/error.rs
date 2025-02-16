@@ -72,6 +72,13 @@ pub enum BroccoliError {
     #[error("Redis error: {0}")]
     Redis(#[from] redis::RedisError),
 
+    /// Represents RabbitMQ-specific errors.
+    ///
+    /// This variant wraps the underlying AMQP error.
+    #[cfg(feature = "rabbitmq")]
+    #[error("RabbitMQ error: {0}")]
+    RabbitMQ(#[from] lapin::Error),
+
     /// Represents errors that occur during job processing.
     ///
     /// This variant can wrap any error that implements the Error trait and is Send + Sync.
@@ -91,4 +98,11 @@ pub enum BroccoliError {
     /// - Getting the position of a message for `RabbitMQ`
     #[error("Feature not implemented")]
     NotImplemented,
+
+    /// Represents errors that occur when an operation is invalid.
+    ///
+    /// # Examples
+    /// - Retrying messages from the ingestion queue
+    #[error("Invalid operation: {0}")]
+    InvalidOperation(String),
 }
