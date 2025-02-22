@@ -72,6 +72,13 @@ pub enum BroccoliError {
     #[error("Redis error: {0}")]
     Redis(#[from] redis::RedisError),
 
+    /// Represents Redis-specific errors.
+    ///
+    /// This variant wraps the underlying Redis error.
+    #[cfg(feature = "surrealdb")]
+    #[error("SurrealDB error: {0}")]
+    SurrealDB(#[from] surrealdb::Error),
+
     /// Represents errors that occur during job processing.
     ///
     /// This variant can wrap any error that implements the Error trait and is Send + Sync.
