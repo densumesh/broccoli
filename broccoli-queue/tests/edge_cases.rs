@@ -1,6 +1,5 @@
-use broccoli_queue::queue::ConsumeOptions;
 use broccoli_queue::queue::ConsumeOptionsBuilder;
-use broccoli_queue::queue::PublishOptions;
+use broccoli_queue::queue::{ConsumeOptions, PublishOptions};
 #[cfg(feature = "redis")]
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
