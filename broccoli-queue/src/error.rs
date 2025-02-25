@@ -85,6 +85,14 @@ pub enum BroccoliError {
     #[error("Job error: {0}")]
     Job(String),
 
+    /// Represents errors that occur during checking queue status.
+    #[error("Queue status error: {0}")]
+    QueueStatus(String),
+
+    /// Represents errors that occur when retrying a queue
+    #[error("Retry Error: {0}")]
+    Retry(String),
+
     /// Represents connection timeout errors.
     ///
     /// # Arguments

@@ -10,7 +10,7 @@ use crate::{
 
 use super::utils::OptionalInternalBrokerMessage;
 
-pub(crate) type RedisPool = bb8_redis::bb8::Pool<bb8_redis::RedisConnectionManager>;
+pub type RedisPool = bb8_redis::bb8::Pool<bb8_redis::RedisConnectionManager>;
 
 #[derive(Default)]
 /// A message broker implementation for Redis.

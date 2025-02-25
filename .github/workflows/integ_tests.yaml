@@ -37,7 +37,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Make test script executable
-        run: chmod +x ./run-tests.sh
+        run: chmod +x ./broccoli-queue/run-tests.sh
 
       - name: Run tests
-        run: ./run-tests.sh
+        run: ./broccoli-queue/run-tests.sh

@@ -5,8 +5,8 @@ use time::Duration;
 
 use time::OffsetDateTime;
 
-use crate::brokers::management::BrokerWithManagement;
-use crate::brokers::management::QueueManagement;
+#[cfg(feature = "management")]
+use crate::brokers::management::{BrokerWithManagement, QueueStatus, QueueType};
 use crate::{
     brokers::{
         broker::{Broker, BrokerConfig, BrokerMessage, InternalBrokerMessage},
@@ -936,7 +936,10 @@ impl BroccoliQueue {
     /// # Errors
     /// If the queue status fails to be retrieved, a `BroccoliError` will be returned.
     #[cfg(feature = "management")]
-    pub async fn queue_status(&self, queue_name: &str) -> Result<QueueStatus, BroccoliError> {
+    pub async fn queue_status(
+        &self,
+        queue_name: Option<String>,
+    ) -> Result<Vec<QueueStatus>, BroccoliError> {
         self.broker
             .get_queue_status(queue_name)
             .await
@@ -958,30 +961,12 @@ impl BroccoliQueue {
     #[cfg(feature = "management")]
     pub async fn retry_queue(
         &self,
-        queue_name: &str,
-        disambiguator: Option<String>,
+        queue_name: String,
         source_type: QueueType,
     ) -> Result<usize, BroccoliError> {
         self.broker
-            .retry_queue(queue_name, disambiguator, source_type)
+            .retry_queue(queue_name, source_type)
             .await
             .map_err(|e| BroccoliError::Retry(format!("Failed to retry queue: {e:?}")))
-    }
-
-    /// Moves all messages from the failed queue back to the main queue for retrying.
-    ///
-    /// # Arguments
-    /// * `queue_name` - The name of the queue.
-    ///
-    /// # Returns
-    /// A `Result` containing the number of messages retried, or a `BroccoliError` on failure.
-    ///
-    /// # Errors
-    /// If the messages fail to be retried, a `BroccoliError` will be returned.
-    pub async fn retry_failed_queue(&self, queue_name: &str) -> Result<usize, BroccoliError> {
-        self.broker
-            .retry_failed_queue(queue_name)
-            .await
-            .map_err(|e| BroccoliError::Retry(format!("Failed to retry failed queue: {e:?}")))
     }
 }
