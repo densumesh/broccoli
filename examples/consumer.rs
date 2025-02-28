@@ -43,6 +43,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let queue_url = "redis://localhost:6380";
     #[cfg(feature = "rabbitmq")]
     let queue_url = "amqp://localhost:5672";
+    #[cfg(feature = "surrealdb")]
+    let queue_url = "ws://localhost:8000";
 
     // Initialize the queue
     let queue = BroccoliQueue::builder(queue_url)
