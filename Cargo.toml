@@ -43,5 +43,9 @@ rabbitmq = ["dep:lapin", "dep:deadpool", "dep:deadpool-lapin"]
 test-fairness = []
 
 [[bench]]
-name = "queue_benchmark"
+name = "amqp_benchmark"
+harness = false
+
+[[bench]]
+name = "redis_benchmark"
 harness = false
