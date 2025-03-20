@@ -188,6 +188,11 @@ pub struct ConsumeOptions {
     pub auto_ack: Option<bool>,
     /// Whether to consume from a fairness queue or not. This is only supported by the Redis Broker.
     pub fairness: Option<bool>,
+    /// how long to wait in tight consumer loops, defaults to zero for `process_messages` and `process_messages_with_handlers`,
+    /// and 500ms for `consume`, which allows those functions to be stopped in a `tokkio::spawn` thread
+    pub consume_wait: Option<std::time::Duration>,
+    // unfortunately, since the options builder can be used in a constant setting, we cannot
+    // add a CancellationToken as an option which would be great way to stop gracefully
 }
 
 impl Default for ConsumeOptions {
@@ -195,6 +200,7 @@ impl Default for ConsumeOptions {
         Self {
             auto_ack: Some(false),
             fairness: None,
+            consume_wait: None,
         }
     }
 }
@@ -212,6 +218,7 @@ impl ConsumeOptions {
 pub struct ConsumeOptionsBuilder {
     auto_ack: Option<bool>,
     fairness: Option<bool>,
+    consume_wait: Option<std::time::Duration>,
 }
 
 impl ConsumeOptionsBuilder {
@@ -221,6 +228,7 @@ impl ConsumeOptionsBuilder {
         Self {
             auto_ack: None,
             fairness: None,
+            consume_wait: None,
         }
     }
 
@@ -238,12 +246,20 @@ impl ConsumeOptionsBuilder {
         self
     }
 
+    /// Sets whether to consume from a fairness queue.
+    #[must_use]
+    pub const fn consume_wait(mut self, consume_wait: std::time::Duration) -> Self {
+        self.consume_wait = Some(consume_wait);
+        self
+    }
+
     /// Builds the `ConsumeOptions` with the configured values.
     #[must_use]
     pub const fn build(self) -> ConsumeOptions {
         ConsumeOptions {
             auto_ack: self.auto_ack,
             fairness: self.fairness,
+            consume_wait: self.consume_wait,
         }
     }
 }
@@ -480,7 +496,7 @@ impl BroccoliQueue {
     /// If the messages fail to consume, a `BroccoliError` will be returned.
     pub async fn consume_batch<T: Clone + serde::Serialize + serde::de::DeserializeOwned>(
         &self,
-        topic: &str,
+        topic: &'static str,
         batch_size: usize,
         timeout: Duration,
         options: Option<ConsumeOptions>,
@@ -511,7 +527,7 @@ impl BroccoliQueue {
     /// If the message fails to consume, a `BroccoliError` will be returned.
     pub async fn try_consume<T: Clone + serde::Serialize + serde::de::DeserializeOwned>(
         &self,
-        topic: &str,
+        topic: &'static str,
         options: Option<ConsumeOptions>,
     ) -> Result<Option<BrokerMessage<T>>, BroccoliError> {
         let serialized_message = self
@@ -540,7 +556,7 @@ impl BroccoliQueue {
     /// If the message fails to acknowledge, a `BroccoliError` will be returned.
     pub async fn acknowledge<T: Clone + serde::Serialize + serde::de::DeserializeOwned>(
         &self,
-        topic: &str,
+        topic: &'static str,
         message: BrokerMessage<T>,
     ) -> Result<(), BroccoliError> {
         self.broker
@@ -566,7 +582,7 @@ impl BroccoliQueue {
     /// If the message fails to reject, a `BroccoliError` will be returned.
     pub async fn reject<T: Clone + serde::Serialize + serde::de::DeserializeOwned>(
         &self,
-        topic: &str,
+        topic: &'static str,
         message: BrokerMessage<T>,
     ) -> Result<(), BroccoliError> {
         self.broker
@@ -641,7 +657,7 @@ impl BroccoliQueue {
     /// If the message fails to process, a `BroccoliError` will be returned.
     pub async fn process_messages<T, F, Fut>(
         &self,
-        topic: &str,
+        topic: &'static str,
         concurrency: Option<usize>,
         consume_options: Option<ConsumeOptions>,
         handler: F,
@@ -653,8 +669,15 @@ impl BroccoliQueue {
     {
         let future_handles = FuturesUnordered::new();
         let consume_options = consume_options.clone();
-
+        // tokio can't abort CPU bound loops, by calling the sleep await, we allow tokio to abort
+        // the running thread, even if the sleep is set to zero
+        let sleep = consume_options
+            .clone()
+            .unwrap_or_default()
+            .consume_wait
+            .unwrap_or(std::time::Duration::ZERO);
         loop {
+            tokio::time::sleep(sleep).await;
             if let Some(concurrency) = concurrency {
                 while future_handles.len() < concurrency {
                     let broker = Arc::clone(&self.broker);
@@ -799,7 +822,7 @@ impl BroccoliQueue {
     /// If the message fails to process, a `BroccoliError` will be returned.
     pub async fn process_messages_with_handlers<T, F, MessageFut, SuccessFut, ErrorFut, S, E, R>(
         &self,
-        topic: &str,
+        topic: &'static str,
         concurrency: Option<usize>,
         consume_options: Option<ConsumeOptions>,
         message_handler: F,
@@ -818,8 +841,15 @@ impl BroccoliQueue {
     {
         let handles = FuturesUnordered::new();
         let consume_options = consume_options.clone();
-
+        // tokio can't abort CPU bound loops, by calling the sleep await, we allow tokio to abort
+        // the running thread, even if the sleep is set to zero
+        let sleep = consume_options
+            .clone()
+            .unwrap_or_default()
+            .consume_wait
+            .unwrap_or(std::time::Duration::ZERO);
         loop {
+            tokio::time::sleep(sleep).await;
             if let Some(concurrency) = concurrency {
                 while handles.len() < concurrency {
                     let broker = Arc::clone(&self.broker);
