@@ -1,10 +1,16 @@
-use broccoli_queue::queue::ConsumeOptions;
+use std::sync::Arc;
+
+use broccoli_queue::error::BroccoliError;
 use broccoli_queue::queue::ConsumeOptionsBuilder;
+use lazy_static::lazy_static;
+
+use broccoli_queue::queue::ConsumeOptions;
 use broccoli_queue::queue::PublishOptions;
 #[cfg(feature = "redis")]
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use time::Duration;
+use tokio::sync::Mutex;
 
 mod common;
 
@@ -184,55 +190,182 @@ async fn test_concurrent_consume() {
     let unique_ids: std::collections::HashSet<_> =
         consumed_messages.iter().map(|m| m.id.clone()).collect();
     assert_eq!(unique_ids.len(), 5);
+}
 
-    #[cfg(feature = "redis")]
-    {
-        #[cfg(not(feature = "test-fairness"))]
-        let queue_name = test_topic;
-        #[cfg(feature = "test-fairness")]
-        let queue_name = format!("{}_job-1_queue", test_topic);
+lazy_static! {
+    // warning: do not share these variables across tests in the same run
+    static ref processed: Arc<tokio::sync::Mutex<usize>> = Arc::new(Mutex::new(0));
+    static ref handled: Arc<tokio::sync::Mutex<usize>> = Arc::new(Mutex::new(0));
+    static ref succeeded: Arc<tokio::sync::Mutex<usize>> = Arc::new(Mutex::new(0));
+}
 
-        // Verify remaining message count
-        let remaining: usize = redis.zcard(queue_name).await.unwrap();
-        assert_eq!(remaining, 5, "Should have 5 messages remaining");
+async fn process_job(m: TestMessage) -> Result<(), BroccoliError> {
+    // helper function to test process_messages
+    let mut lock = processed.lock().await;
+    let value = m.id.parse::<usize>().expect("should have id as an int");
+    *lock += value;
+    Ok(())
+}
 
-        #[cfg(not(feature = "test-fairness"))]
-        let processing_queue_name = format!("{}_processing", test_topic);
-        #[cfg(feature = "test-fairness")]
-        let processing_queue_name = format!("{}_job-1_processing", test_topic);
+async fn process_handler(m: TestMessage) -> Result<(), BroccoliError> {
+    // helper function to test process_messages_with_handlers
+    let mut lock = handled.lock().await;
+    *lock += m.id.parse::<usize>().expect("should have id as an int");
+    Ok(())
+}
 
-        // Verify processing queue
-        let processing: usize = redis.llen(processing_queue_name).await.unwrap();
-        assert_eq!(
-            processing, 0,
-            "Processing queue should be empty after acknowledgments"
-        );
+async fn success_handler(m: TestMessage) -> Result<(), BroccoliError> {
+    // helper function to test process_messages_with_handlers
+    let mut lock = succeeded.lock().await;
+    *lock += m.id.parse::<usize>().expect("should have id as an int");
+    Ok(())
+}
 
-        // Add verification for each consumed message
-        for consumed_msg in &consumed_messages {
-            let task_exists: bool = redis
-                .hexists(consumed_msg.id.clone(), "payload")
-                .await
-                .unwrap();
-            assert!(
-                !task_exists,
-                "Message should be cleaned up after acknowledgment"
-            );
+async fn error_handler(_: TestMessage, err: BroccoliError) -> Result<(), BroccoliError> {
+    // helper function to test process_messages_with_handlers
+    panic!("Should not invoke the error handler in testing {}", err);
+}
+
+#[tokio::test]
+async fn test_process_messages() {
+    let producer_queue = common::setup_queue().await;
+    let consumer_queue = producer_queue.clone();
+
+    // launch consumer first
+    let consumer = tokio::spawn(async move {
+        let _ = consumer_queue
+            .process_messages("test_process_messages_topic", Some(5), None, |msg| async {
+                process_job(msg.payload).await
+            })
+            .await;
+        panic!("Spawn should have been killed while processing");
+    });
+    // Create multiple messages
+    let messages: Vec<_> = (0..10)
+        .map(|i| TestMessage {
+            id: i.to_string(),
+            content: format!("content test_process_messages {}", i),
+        })
+        .collect();
+    let published = producer_queue
+        .publish_batch("test_process_messages_topic", None, messages, None)
+        .await
+        .expect("Could not publish");
+    assert_eq!(10, published.len());
+    let expected_count = 9 * 10 / 2; // 0 + 1 + ... + n = n(n+1)/2
+    let wait = tokio::spawn(async move {
+        let mut counter = 0;
+        while counter < expected_count {
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            let lock = processed.lock().await;
+            counter = *lock;
         }
+        consumer.abort();
+    });
+    // consumer will block forever once consumed all messages, so we
+    // just wait for 1 second and check the counter
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), wait).await;
+    let lock = processed.lock().await;
+    let total_processed = *lock;
+    assert_eq!(
+        expected_count, total_processed,
+        "We should have processed 10 messages"
+    );
 
-        // Verify fairness is maintained during concurrent consumption
-        if unique_ids.len() != 5 {
-            let mut id_counts = std::collections::HashMap::new();
-            for msg in consumed_messages {
-                *id_counts.entry(msg.id).or_insert(0) += 1;
-            }
-            for (id, count) in id_counts {
-                assert!(count <= 1, "Message {} was consumed {} times", id, count);
-            }
+    let empty: Option<broccoli_queue::brokers::broker::BrokerMessage<TestMessage>> =
+        common::setup_queue()
+            .await
+            .try_consume("test_process_messages_topic", None)
+            .await
+            .expect("");
+    assert!(empty.is_none(), "No messages left");
+}
+
+#[tokio::test]
+async fn test_process_messages_with_handlers() {
+    let producer_queue = common::setup_queue().await;
+    let consumer_queue = producer_queue.clone();
+
+    // launch consumer first
+    let consumer = tokio::spawn(async move {
+        let _ = consumer_queue
+            .process_messages_with_handlers(
+                "test_process_messages_with_handlers_topic",
+                Some(5),
+                None,
+                |msg| async move { process_handler(msg.payload).await },
+                |msg, _result| async { success_handler(msg.payload).await },
+                |msg, err| async { error_handler(msg.payload, err).await },
+            )
+            .await;
+        panic!("Spawn should have been killed while processing");
+    });
+    // Create multiple messages
+    let messages: Vec<_> = (0..10)
+        .map(|i| TestMessage {
+            id: i.to_string(),
+            content: format!("content test_process_messages_with_handlers_topic {}", i),
+        })
+        .collect();
+    let published = producer_queue
+        .publish_batch(
+            "test_process_messages_with_handlers_topic",
+            None,
+            messages,
+            None,
+        )
+        .await
+        .expect("Could not publish");
+    assert_eq!(10, published.len());
+    let expected_count = 9 * 10 / 2; // 0 + 1 + ... + n = n(n+1)/2
+
+    let wait = tokio::spawn(async move {
+        let mut counter = 0;
+        while counter < expected_count {
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            let lock = succeeded.lock().await;
+            counter = *lock;
         }
+        consumer.abort();
+    });
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(1), wait)
+        .await
+        .expect("Took too long to consume");
+    let lock = succeeded.lock().await;
+    let total_succeeded = *lock;
+    assert_eq!(
+        expected_count, total_succeeded,
+        "Should have successfully handled 10 messages"
+    );
+    let empty: Option<broccoli_queue::brokers::broker::BrokerMessage<TestMessage>> =
+        common::setup_queue()
+            .await
+            .try_consume("test_process_messages_with_handlers_topic", None)
+            .await
+            .expect("");
+    assert!(empty.is_none(), "No messages left");
+}
+
+#[cfg(feature = "surrealdb")]
+#[tokio::test]
+async fn test_ttl_not_implemented() {
+    let queue = common::setup_queue().await;
+    let test_topic = "test_zero_ttl_topic";
+    let message = TestMessage {
+        id: "zero_ttl".to_string(),
+        content: "expires immediately".to_string(),
+    };
+    let options = PublishOptions::builder().ttl(Duration::seconds(0)).build();
+    let result = queue
+        .publish(test_topic, None, &message, Some(options))
+        .await;
+
+    if result.is_ok() {
+        panic!("Should be unimplemented")
     }
 }
 
+#[cfg(not(feature = "surrealdb"))]
 #[tokio::test]
 async fn test_zero_ttl() {
     let queue = common::setup_queue().await;

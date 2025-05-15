@@ -12,6 +12,13 @@ pub enum BroccoliError {
     #[error("Broker error: {0}")]
     Broker(String),
 
+    /// Errors that occur during broker implementations related to concurrent operations not being idempotent
+    ///
+    /// # Examples
+    /// - Multiple concurrent reads on the same topic
+    #[error("Broker error: non-idempotent operation {0}")]
+    BrokerNonIdempotentOp(String),
+
     /// Represents errors that occur during message publishing.
     ///
     /// # Examples
@@ -71,6 +78,13 @@ pub enum BroccoliError {
     #[cfg(feature = "redis")]
     #[error("Redis error: {0}")]
     Redis(#[from] redis::RedisError),
+
+    /// Represents Redis-specific errors.
+    ///
+    /// This variant wraps the underlying Redis error.
+    #[cfg(feature = "surrealdb")]
+    #[error("SurrealDB error: {0}")]
+    SurrealDB(#[from] surrealdb::Error),
 
     /// Represents errors that occur during job processing.
     ///

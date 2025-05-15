@@ -1,4 +1,4 @@
-use std::{collections::HashMap, future::Future};
+use std::collections::HashMap;
 
 use crate::{
     error::BroccoliError,
@@ -100,6 +100,7 @@ pub trait Broker: Send + Sync {
 }
 
 /// Configuration options for broker behavior.
+#[derive(Debug, Clone)]
 pub struct BrokerConfig {
     /// Maximum number of retry attempts for failed messages
     pub retry_attempts: Option<u8>,
@@ -253,4 +254,7 @@ pub enum BrokerType {
     /// RabbitMQ-based message broker
     #[cfg(feature = "rabbitmq")]
     RabbitMQ,
+    /// SurrealDB-based message broker
+    #[cfg(feature = "surrealdb")]
+    SurrealDB,
 }
