@@ -93,6 +93,10 @@ pub struct BroccoliQueueBuilder {
     /// NOTE: If you enable this w/ rabbitmq, you will need to install the delayed-exchange plugin
     /// <https://www.rabbitmq.com/blog/2015/04/16/scheduling-messages-with-rabbitmq>
     enable_scheduling: Option<bool>,
+    #[cfg(feature = "surrealdb")]
+    /// Existing surrealdb database connection to be reused
+    /// (Surrealdb only)
+    surrealdb_connection: Option<surrealdb::Surreal<surrealdb::engine::any::Any>>,
 }
 
 impl BroccoliQueueBuilder {
@@ -110,6 +114,32 @@ impl BroccoliQueueBuilder {
             retry_failed: None,
             pool_connections: None,
             enable_scheduling: None,
+            #[cfg(feature = "surrealdb")]
+            surrealdb_connection: None,
+        }
+    }
+
+    /// Creates a new `BroccoliQueueBuilder` with the specified broker instance, with the broker URL
+    ///
+    /// # Arguments
+    /// * `db` - Surrealdb database connection
+    /// * `broker_url` - unused, expected to be a URL that is representative of the original connection
+    ///
+    /// # Returns
+    /// A new `BroccoliQueueBuilder` instance.
+    #[cfg(feature = "surrealdb")]
+    pub fn new_with_surrealdb(
+        db: surrealdb::Surreal<surrealdb::engine::any::Any>,
+        broker_url: impl Into<String>,
+    ) -> Self {
+        Self {
+            broker_url: broker_url.into(),
+            retry_attempts: None,
+            retry_failed: None,
+            pool_connections: None,
+            enable_scheduling: None,
+            #[cfg(feature = "surrealdb")]
+            surrealdb_connection: Some(db),
         }
     }
 
@@ -169,6 +199,8 @@ impl BroccoliQueueBuilder {
             retry_failed: self.retry_failed,
             pool_connections: self.pool_connections,
             enable_scheduling: self.enable_scheduling,
+            #[cfg(feature = "surrealdb")]
+            surrealdb_connection: self.surrealdb_connection,
         };
 
         let broker = connect_to_broker(&self.broker_url, Some(config))
@@ -188,6 +220,11 @@ pub struct ConsumeOptions {
     pub auto_ack: Option<bool>,
     /// Whether to consume from a fairness queue or not. This is only supported by the Redis Broker.
     pub fairness: Option<bool>,
+    /// how long to wait in tight consumer loops, defaults to zero for `process_messages` and `process_messages_with_handlers`,
+    /// and 500ms for `consume`, which allows those functions to be stopped in a `tokkio::spawn` thread
+    pub consume_wait: Option<std::time::Duration>,
+    // unfortunately, since the options builder can be used in a constant setting, we cannot
+    // add a CancellationToken as an option which would be great way to stop gracefully
 }
 
 impl Default for ConsumeOptions {
@@ -195,6 +232,7 @@ impl Default for ConsumeOptions {
         Self {
             auto_ack: Some(false),
             fairness: None,
+            consume_wait: None,
         }
     }
 }
@@ -212,6 +250,7 @@ impl ConsumeOptions {
 pub struct ConsumeOptionsBuilder {
     auto_ack: Option<bool>,
     fairness: Option<bool>,
+    consume_wait: Option<std::time::Duration>,
 }
 
 impl ConsumeOptionsBuilder {
@@ -221,6 +260,7 @@ impl ConsumeOptionsBuilder {
         Self {
             auto_ack: None,
             fairness: None,
+            consume_wait: None,
         }
     }
 
@@ -238,12 +278,20 @@ impl ConsumeOptionsBuilder {
         self
     }
 
+    /// Time to wait between iterations of tight consumer loops, so they can be interrupted (can be set to zero)
+    #[must_use]
+    pub const fn consume_wait(mut self, consume_wait: std::time::Duration) -> Self {
+        self.consume_wait = Some(consume_wait);
+        self
+    }
+
     /// Builds the `ConsumeOptions` with the configured values.
     #[must_use]
     pub const fn build(self) -> ConsumeOptions {
         ConsumeOptions {
             auto_ack: self.auto_ack,
             fairness: self.fairness,
+            consume_wait: self.consume_wait,
         }
     }
 }
@@ -365,6 +413,24 @@ impl BroccoliQueue {
     /// A new `BroccoliQueueBuilder` instance.
     pub fn builder(broker_url: impl Into<String>) -> BroccoliQueueBuilder {
         BroccoliQueueBuilder::new(broker_url)
+    }
+
+    #[cfg(feature = "surrealdb")]
+    /// Creates a new `BroccoliQueueBuilder` with the specified surrealdb connection.
+    /// (Only available with the `surrealdb` feature)
+    ///
+    /// # Arguments
+    /// *
+    /// * `db` - Surrealdb database connection
+    /// * `broker_url` - unused, expected to be a URL that is representative of the original connection
+    ///
+    /// # Returns
+    /// A new `BroccoliQueueBuilder` instance.
+    pub fn builder_with(
+        db: surrealdb::Surreal<surrealdb::engine::any::Any>,
+        broker_url: impl Into<String>,
+    ) -> BroccoliQueueBuilder {
+        BroccoliQueueBuilder::new_with_surrealdb(db, broker_url)
     }
 
     /// Publishes a message to the specified topic.
@@ -566,7 +632,7 @@ impl BroccoliQueue {
     /// If the message fails to reject, a `BroccoliError` will be returned.
     pub async fn reject<T: Clone + serde::Serialize + serde::de::DeserializeOwned>(
         &self,
-        topic: &str,
+        topic: &'static str,
         message: BrokerMessage<T>,
     ) -> Result<(), BroccoliError> {
         self.broker
@@ -641,7 +707,7 @@ impl BroccoliQueue {
     /// If the message fails to process, a `BroccoliError` will be returned.
     pub async fn process_messages<T, F, Fut>(
         &self,
-        topic: &str,
+        topic: &'static str,
         concurrency: Option<usize>,
         consume_options: Option<ConsumeOptions>,
         handler: F,
@@ -653,10 +719,18 @@ impl BroccoliQueue {
     {
         let future_handles = FuturesUnordered::new();
         let consume_options = consume_options.clone();
-
+        // tokio can't abort CPU bound loops, by calling the sleep await, we allow tokio to abort
+        // the running thread, even if the sleep is set to zero
+        let sleep = consume_options
+            .clone()
+            .unwrap_or_default()
+            .consume_wait
+            .unwrap_or(std::time::Duration::ZERO);
         loop {
+            tokio::time::sleep(sleep).await;
             if let Some(concurrency) = concurrency {
                 while future_handles.len() < concurrency {
+                    tokio::time::sleep(sleep).await;
                     let broker = Arc::clone(&self.broker);
                     let topic = topic.to_string();
                     let handler = handler.clone();
@@ -664,6 +738,7 @@ impl BroccoliQueue {
 
                     let handle = tokio::spawn(async move {
                         loop {
+                            tokio::time::sleep(sleep).await;
                             let message = broker
                                 .consume(&topic, consume_options.clone())
                                 .await
@@ -765,7 +840,7 @@ impl BroccoliQueue {
     ///         Ok(())
     ///     }
     ///
-    ///     async fn on_success(message: BrokerMessage<JobPayload>) -> Result<(), BroccoliError> {
+    ///     async fn on_success(message: BrokerMessage<JobPayload>, _: ()) -> Result<(), BroccoliError> {
     ///         println!("Successfully processed message: {}", message.task_id);
     ///         Ok(())
     ///     }
@@ -801,7 +876,7 @@ impl BroccoliQueue {
     /// If the message fails to process, a `BroccoliError` will be returned.
     pub async fn process_messages_with_handlers<T, F, MessageFut, SuccessFut, ErrorFut, S, E, R>(
         &self,
-        topic: &str,
+        topic: &'static str,
         concurrency: Option<usize>,
         consume_options: Option<ConsumeOptions>,
         message_handler: F,
@@ -820,8 +895,15 @@ impl BroccoliQueue {
     {
         let handles = FuturesUnordered::new();
         let consume_options = consume_options.clone();
-
+        // tokio can't abort CPU bound loops, by calling the sleep await, we allow tokio to abort
+        // the running thread, even if the sleep is set to zero
+        let sleep = consume_options
+            .clone()
+            .unwrap_or_default()
+            .consume_wait
+            .unwrap_or(std::time::Duration::ZERO);
         loop {
+            tokio::time::sleep(sleep).await;
             if let Some(concurrency) = concurrency {
                 while handles.len() < concurrency {
                     let broker = Arc::clone(&self.broker);
@@ -833,6 +915,7 @@ impl BroccoliQueue {
 
                     let handle = tokio::spawn(async move {
                         loop {
+                            tokio::time::sleep(sleep).await;
                             let message = broker
                                 .consume(&topic, consume_options.clone())
                                 .await
