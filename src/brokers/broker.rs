@@ -1,4 +1,4 @@
-use std::{collections::HashMap, future::Future};
+use std::collections::HashMap;
 
 use crate::{
     error::BroccoliError,
@@ -100,6 +100,7 @@ pub trait Broker: Send + Sync {
 }
 
 /// Configuration options for broker behavior.
+#[derive(Debug, Clone)]
 pub struct BrokerConfig {
     /// Maximum number of retry attempts for failed messages
     pub retry_attempts: Option<u8>,
@@ -112,6 +113,10 @@ pub struct BrokerConfig {
     /// NOTE: If you enable this w/ rabbitmq, you will need to install the delayed-exchange plugin
     /// <https://www.rabbitmq.com/blog/2015/04/16/scheduling-messages-with-rabbitmq>
     pub enable_scheduling: Option<bool>,
+    #[cfg(feature = "surrealdb")]
+    /// Existing surrealdb database connection to be reused
+    /// (Surrealdb only)
+    pub surrealdb_connection: Option<surrealdb::Surreal<surrealdb::engine::any::Any>>,
 }
 
 impl Default for BrokerConfig {
@@ -121,6 +126,8 @@ impl Default for BrokerConfig {
             retry_failed: Some(true),
             pool_connections: Some(10),
             enable_scheduling: Some(false),
+            #[cfg(feature = "surrealdb")]
+            surrealdb_connection: None,
         }
     }
 }
@@ -253,4 +260,7 @@ pub enum BrokerType {
     /// RabbitMQ-based message broker
     #[cfg(feature = "rabbitmq")]
     RabbitMQ,
+    /// SurrealDB-based message broker
+    #[cfg(feature = "surrealdb")]
+    SurrealDB,
 }
