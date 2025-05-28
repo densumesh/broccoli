@@ -1,5 +1,5 @@
 use crate::{
-    brokers::broker::{BrokerConfig, BrokerType},
+    brokers::broker::{Broker, BrokerConfig, BrokerType},
     error::BroccoliError,
 };
 
