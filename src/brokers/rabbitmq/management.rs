@@ -1,10 +1,6 @@
-use lapin::{
-    options::{BasicAckOptions, BasicGetOptions, BasicPublishOptions},
-    BasicProperties,
-};
 
 use crate::{
-    brokers::management::{BrokerWithManagement, QueueManagement, QueueStatus, QueueType},
+    brokers::management::{BrokerWithManagement, QueueManagement, QueueStatus},
     error::BroccoliError,
 };
 

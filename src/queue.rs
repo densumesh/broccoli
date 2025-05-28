@@ -6,7 +6,7 @@ use time::Duration;
 use time::OffsetDateTime;
 
 #[cfg(feature = "management")]
-use crate::brokers::management::{BrokerWithManagement, QueueStatus, QueueType};
+use crate::brokers::management::{BrokerWithManagement, QueueStatus};
 
 use crate::{
     brokers::{

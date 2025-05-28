@@ -3,7 +3,9 @@ use crate::error::BroccoliError;
 use derive_more::Display;
 
 #[async_trait::async_trait]
+/// Trait for managing the state of broccoli queues.
 pub trait QueueManagement {
+    /// Gets the status of queues matching the specified queue name pattern.
     async fn get_queue_status(
         &self,
         queue_name: String,

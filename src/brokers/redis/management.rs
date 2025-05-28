@@ -17,11 +17,13 @@ impl QueueManagement for RedisBroker {
         disambiguator: Option<String>,
     ) -> Result<Vec<QueueStatus>, BroccoliError> {
         let mut redis = self.get_redis_connection().await?;
-        let keys: Vec<String> = if !queue_name.is_empty() {
-            redis.keys(format!("{queue_name}*")).await?
-        } else {
-            redis.keys("*").await?
-        };
+        if queue_name.is_empty() {
+            return Err(BroccoliError::QueueStatus(
+                "Queue name cannot be empty. Please specify a queue name to avoid scanning all Redis keys.".to_string()
+            ));
+        }
+        
+        let keys: Vec<String> = redis.keys(format!("{queue_name}*")).await?;
 
         let mut queues: HashMap<String, QueueStatus> = HashMap::new();
         let mut fairness_queues: HashMap<String, HashSet<String>> = HashMap::new();
@@ -113,9 +115,9 @@ impl QueueManagement for RedisBroker {
 
             // Check if this is a subqueue of a fairness queue
             if let Some((base_name, queue_disambiguator)) = is_fairness_subqueue(&key) {
-                let queue_identifier = if let Some(_) = &disambiguator {
+                let queue_identifier = if disambiguator.is_some() {
                     // When filtering by disambiguator, use base_name + disambiguator as identifier
-                    format!("{}_{}", base_name, queue_disambiguator) // base_name + disambiguator
+                    format!("{base_name}_{queue_disambiguator}") // base_name + disambiguator
                 } else {
                     // When not filtering, group all under base_name
                     base_name.clone()
@@ -130,7 +132,7 @@ impl QueueManagement for RedisBroker {
                     disambiguator_count: if disambiguator.is_some() {
                         Some(1) // When filtering by disambiguator, count is 1
                     } else {
-                        fairness_queues.get(&base_name).map(|set| set.len())
+                        fairness_queues.get(&base_name).map(std::collections::HashSet::len)
                     },
                 });
 

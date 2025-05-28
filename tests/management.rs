@@ -1,5 +1,6 @@
 mod common;
 
+#[cfg(feature = "management")]
 use broccoli_queue::brokers::management::QueueType;
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +16,7 @@ async fn test_queue_status_main_queue() {
     let queue = common::setup_queue().await;
 
     #[cfg(feature = "redis")]
-    let mut redis = common::get_redis_client().await;
+    let redis = common::get_redis_client().await;
     let test_topic_main = "test_status_main";
 
     // Test messages
@@ -72,21 +73,14 @@ async fn test_queue_status_main_queue() {
         );
     }
 
-    // Test 3: Get all queue statuses (empty queue name)
-    let all_status = queue
+    // Test 3: Verify empty queue name returns error
+    let empty_result = queue
         .queue_status("".to_string(), None)
-        .await
-        .expect("Failed to get all queue statuses");
-
-    #[cfg(not(feature = "test-fairness"))]
-    {
-        // Find our test queue in the status list
-        let our_queue = all_status.iter().find(|s| s.name == test_topic_main);
-        assert!(
-            our_queue.is_some(),
-            "Our test queue should be in the status list"
-        );
-    }
+        .await;
+    assert!(
+        empty_result.is_err(),
+        "Empty queue name should return an error to prevent scanning all Redis keys"
+    );
 
     #[cfg(feature = "redis")]
     {
@@ -370,7 +364,7 @@ async fn test_queue_status_pattern_matching() {
         .expect("Failed to get pattern matched queue status");
 
     assert!(
-        status.len() >= 1,
+        !status.is_empty(),
         "Should find at least one queue matching the pattern"
     );
 
@@ -381,7 +375,7 @@ async fn test_queue_status_pattern_matching() {
         .expect("Failed to get exact queue status");
 
     assert!(
-        exact_status.len() >= 1,
+        !exact_status.is_empty(),
         "Should find the exact queue"
     );
 
@@ -415,5 +409,26 @@ async fn test_queue_status_pattern_matching() {
                 }
             }
         }
+    }
+}
+
+#[tokio::test]
+#[cfg(feature = "management")]
+async fn test_queue_status_empty_name_error() {
+    let queue = common::setup_queue().await;
+
+    // Test that empty queue name returns an error to prevent dangerous KEYS * operations
+    let result = queue.queue_status("".to_string(), None).await;
+    
+    assert!(result.is_err(), "Empty queue name should return an error");
+    
+    if let Err(e) = result {
+        let error_message = e.to_string();
+        assert!(
+            error_message.contains("Queue name cannot be empty") || 
+            error_message.contains("avoid scanning all Redis keys"),
+            "Error should mention avoiding Redis key scanning, got: {}", 
+            error_message
+        );
     }
 }

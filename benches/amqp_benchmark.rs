@@ -14,7 +14,7 @@ struct BenchmarkMessage {
 const ADDR: &str = "amqp://localhost:5672/";
 
 async fn setup_amqp() -> Result<Connection> {
-    Connection::connect(&ADDR, ConnectionProperties::default()).await
+    Connection::connect(ADDR, ConnectionProperties::default()).await
 }
 
 async fn setup_broccoli() -> BroccoliQueue {

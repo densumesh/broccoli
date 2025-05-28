@@ -1,5 +1,3 @@
-#[cfg(feature = "management")]
-use broccoli_queue::brokers::management::QueueType;
 use broccoli_queue::queue::{ConsumeOptions, ConsumeOptionsBuilder, PublishOptions};
 #[cfg(feature = "redis")]
 use redis::AsyncCommands;

@@ -1,10 +1,9 @@
-use broccoli_queue::queue::ConsumeOptions;
-use broccoli_queue::queue::ConsumeOptionsBuilder;
-use broccoli_queue::queue::PublishOptions;
+use broccoli_queue::queue::{ConsumeOptionsBuilder, PublishOptions};
 #[cfg(feature = "redis")]
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use time::Duration;
+use broccoli_queue::queue::ConsumeOptions;
 
 mod common;
 
