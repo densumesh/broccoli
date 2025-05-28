@@ -29,6 +29,7 @@ redis = { version = "0.27.5", features = [
     "aio",
 ], optional = true }
 dashmap = "6.1.0"
+derive_more = { version = "2.0.1", features = ["display"], optional = true }
 
 [dev-dependencies]
 chrono = { version = "0.4.39", features = ["serde"] }
@@ -41,6 +42,9 @@ default = []
 redis = ["dep:bb8-redis", "dep:redis"]
 rabbitmq = ["dep:lapin", "dep:deadpool", "dep:deadpool-lapin"]
 test-fairness = []
+
+# Allows for access to the management API for the queue.
+management = ["dep:derive_more"]
 
 [[bench]]
 name = "amqp_benchmark"

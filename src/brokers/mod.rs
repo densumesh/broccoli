@@ -8,3 +8,7 @@ pub mod rabbitmq;
 /// Contains the Redis broker implementation
 #[cfg(feature = "redis")]
 pub mod redis;
+
+#[cfg(feature = "management")]
+// Contains the management interface for brokers
+pub mod management;

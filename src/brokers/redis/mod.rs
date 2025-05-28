@@ -4,3 +4,6 @@ pub mod broker;
 pub(crate) mod utils;
 
 pub use broker::RedisBroker;
+
+#[cfg(feature = "management")]
+pub mod management;
