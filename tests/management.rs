@@ -29,15 +29,17 @@ async fn test_queue_status_main_queue() {
         content: "status content 2".to_string(),
     };
 
-    // Test 1: Empty queue status
+    // Test 1: Non-existent queue should return empty status (size 0)
     let status = queue
         .queue_status(test_topic_main.to_string(), None)
         .await
         .expect("Failed to get queue status");
-    assert!(
-        status.is_empty(),
-        "Status should be empty for non-existent queue"
-    );
+    
+    assert_eq!(status.name, test_topic_main);
+    assert_eq!(status.queue_type, QueueType::Main);
+    assert_eq!(status.size, 0, "Non-existent queue should have size 0");
+    assert_eq!(status.processing, 0, "Non-existent queue should have 0 processing");
+    assert_eq!(status.failed, 0, "Non-existent queue should have 0 failed");
 
     // Test 2: Publish messages to main queue and verify status
     #[cfg(not(feature = "test-fairness"))]
@@ -57,18 +59,16 @@ async fn test_queue_status_main_queue() {
             .await
             .expect("Failed to get queue status");
 
-        assert_eq!(status.len(), 1, "Should have one queue status entry");
-        let queue_status = &status[0];
-        assert_eq!(queue_status.name, test_topic_main);
-        assert_eq!(queue_status.queue_type, QueueType::Main);
-        assert_eq!(queue_status.size, 2, "Queue should have 2 messages");
+        assert_eq!(status.name, test_topic_main);
+        assert_eq!(status.queue_type, QueueType::Main);
+        assert_eq!(status.size, 2, "Queue should have 2 messages");
         assert_eq!(
-            queue_status.processing, 0,
+            status.processing, 0,
             "No messages should be processing"
         );
-        assert_eq!(queue_status.failed, 0, "No messages should be failed");
+        assert_eq!(status.failed, 0, "No messages should be failed");
         assert_eq!(
-            queue_status.disambiguator_count, None,
+            status.disambiguator_count, None,
             "Main queue should not have disambiguator count"
         );
     }
@@ -153,25 +153,19 @@ async fn test_queue_status_fairness_queue() {
         .await
         .expect("Failed to get fairness queue status");
 
+    assert_eq!(status.name, test_topic_fairness);
+    assert_eq!(status.queue_type, QueueType::Fairness);
     assert_eq!(
-        status.len(),
-        1,
-        "Should have one fairness queue status entry"
-    );
-    let queue_status = &status[0];
-    assert_eq!(queue_status.name, test_topic_fairness);
-    assert_eq!(queue_status.queue_type, QueueType::Fairness);
-    assert_eq!(
-        queue_status.size, 3,
+        status.size, 3,
         "Fairness queue should have 3 messages total"
     );
     assert_eq!(
-        queue_status.processing, 0,
+        status.processing, 0,
         "No messages should be processing"
     );
-    assert_eq!(queue_status.failed, 0, "No messages should be failed");
+    assert_eq!(status.failed, 0, "No messages should be failed");
     assert_eq!(
-        queue_status.disambiguator_count,
+        status.disambiguator_count,
         Some(2),
         "Fairness queue should have 2 disambiguators"
     );
@@ -182,25 +176,19 @@ async fn test_queue_status_fairness_queue() {
         .await
         .expect("Failed to get fairness queue status for job-1");
 
+    assert_eq!(status_job1.name, format!("{}_job-1", test_topic_fairness));
+    assert_eq!(status_job1.queue_type, QueueType::Fairness);
     assert_eq!(
-        status_job1.len(),
-        1,
-        "Should have one queue status entry for job-1"
-    );
-    let queue_status_job1 = &status_job1[0];
-    assert_eq!(queue_status_job1.name, format!("{}_job-1", test_topic_fairness));
-    assert_eq!(queue_status_job1.queue_type, QueueType::Fairness);
-    assert_eq!(
-        queue_status_job1.size, 2,
+        status_job1.size, 2,
         "job-1 disambiguator should have 2 messages"
     );
     assert_eq!(
-        queue_status_job1.processing, 0,
+        status_job1.processing, 0,
         "No messages should be processing"
     );
-    assert_eq!(queue_status_job1.failed, 0, "No messages should be failed");
+    assert_eq!(status_job1.failed, 0, "No messages should be failed");
     assert_eq!(
-        queue_status_job1.disambiguator_count,
+        status_job1.disambiguator_count,
         Some(1),
         "Should show count of 1 when filtering by disambiguator"
     );
@@ -211,16 +199,10 @@ async fn test_queue_status_fairness_queue() {
         .await
         .expect("Failed to get fairness queue status for job-2");
 
+    assert_eq!(status_job2.name, format!("{}_job-2", test_topic_fairness));
+    assert_eq!(status_job2.queue_type, QueueType::Fairness);
     assert_eq!(
-        status_job2.len(),
-        1,
-        "Should have one queue status entry for job-2"
-    );
-    let queue_status_job2 = &status_job2[0];
-    assert_eq!(queue_status_job2.name, format!("{}_job-2", test_topic_fairness));
-    assert_eq!(queue_status_job2.queue_type, QueueType::Fairness);
-    assert_eq!(
-        queue_status_job2.size, 1,
+        status_job2.size, 1,
         "job-2 disambiguator should have 1 message"
     );
 
@@ -230,10 +212,11 @@ async fn test_queue_status_fairness_queue() {
         .await
         .expect("Failed to get fairness queue status for non-existent disambiguator");
 
-    assert!(
-        status_nonexistent.is_empty(),
-        "Should have no status entries for non-existent disambiguator"
-    );
+    assert_eq!(status_nonexistent.name, format!("{}_job-999", test_topic_fairness));
+    assert_eq!(status_nonexistent.queue_type, QueueType::Fairness);
+    assert_eq!(status_nonexistent.size, 0, "Non-existent disambiguator should have size 0");
+    assert_eq!(status_nonexistent.processing, 0, "Non-existent disambiguator should have 0 processing");
+    assert_eq!(status_nonexistent.failed, 0, "Non-existent disambiguator should have 0 failed");
 
     #[cfg(feature = "redis")]
     {
@@ -282,9 +265,8 @@ async fn test_queue_status_processing_and_failed() {
         .await
         .expect("Failed to get queue status");
 
-    let queue_status = &status[0];
     assert_eq!(
-        queue_status.processing, 1,
+        status.processing, 1,
         "One message should be processing"
     );
 
@@ -302,9 +284,8 @@ async fn test_queue_status_processing_and_failed() {
         .await
         .expect("Failed to get queue status after reject");
 
-    let queue_status_after = &status_after_reject[0];
     assert_eq!(
-        queue_status_after.processing, 0,
+        status_after_reject.processing, 0,
         "No messages should be processing after reject"
     );
     // The message should either be back in queue or in failed queue depending on retry settings
@@ -323,7 +304,7 @@ async fn test_queue_status_processing_and_failed() {
 
 #[tokio::test]
 #[cfg(feature = "management")]
-async fn test_queue_status_pattern_matching() {
+async fn test_queue_status_specific_queue_lookup() {
     let queue = common::setup_queue().await;
     let base_name = "test_pattern";
 
@@ -357,27 +338,32 @@ async fn test_queue_status_pattern_matching() {
             .expect("Failed to publish to queue2");
     }
 
-    // Test pattern matching with base name
-    let status = queue
-        .queue_status(base_name.to_string(), None)
-        .await
-        .expect("Failed to get pattern matched queue status");
-
-    assert!(
-        !status.is_empty(),
-        "Should find at least one queue matching the pattern"
-    );
-
-    // Test exact queue name match
-    let exact_status = queue
+    // Test exact queue name match for queue1
+    let exact_status1 = queue
         .queue_status(format!("{}_queue1", base_name), None)
         .await
         .expect("Failed to get exact queue status");
 
-    assert!(
-        !exact_status.is_empty(),
-        "Should find the exact queue"
-    );
+    assert_eq!(exact_status1.name, format!("{}_queue1", base_name));
+    assert!(exact_status1.size > 0, "Queue1 should have messages");
+
+    // Test exact queue name match for queue2
+    let exact_status2 = queue
+        .queue_status(format!("{}_queue2", base_name), None)
+        .await
+        .expect("Failed to get exact queue status");
+
+    assert_eq!(exact_status2.name, format!("{}_queue2", base_name));
+    assert!(exact_status2.size > 0, "Queue2 should have messages");
+
+    // Test non-existent queue returns empty status
+    let nonexistent_status = queue
+        .queue_status(format!("{}_nonexistent", base_name), None)
+        .await
+        .expect("Failed to get non-existent queue status");
+
+    assert_eq!(nonexistent_status.name, format!("{}_nonexistent", base_name));
+    assert_eq!(nonexistent_status.size, 0, "Non-existent queue should have size 0");
 
     #[cfg(feature = "redis")]
     {

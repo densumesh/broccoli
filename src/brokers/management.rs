@@ -5,12 +5,12 @@ use derive_more::Display;
 #[async_trait::async_trait]
 /// Trait for managing the state of broccoli queues.
 pub trait QueueManagement {
-    /// Gets the status of queues matching the specified queue name pattern.
+    /// Gets the status of the queue with the specified queue name.
     async fn get_queue_status(
         &self,
         queue_name: String,
         disambiguator: Option<String>,
-    ) -> Result<Vec<QueueStatus>, BroccoliError>;
+    ) -> Result<QueueStatus, BroccoliError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Display)]

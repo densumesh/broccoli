@@ -946,7 +946,7 @@ impl BroccoliQueue {
         &self,
         queue_name: String,
         disambiguator: Option<String>,
-    ) -> Result<Vec<QueueStatus>, BroccoliError> {
+    ) -> Result<QueueStatus, BroccoliError> {
         self.broker
             .get_queue_status(queue_name, disambiguator)
             .await
