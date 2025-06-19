@@ -8,6 +8,9 @@ pub mod rabbitmq;
 /// Contains the Redis broker implementation
 #[cfg(feature = "redis")]
 pub mod redis;
+/// Contains the `SurrealDB` broker implementation
+#[cfg(feature = "surrealdb")]
+pub mod surrealdb;
 
 #[cfg(feature = "management")]
 /// Contains the management interface for brokers

@@ -29,18 +29,22 @@ redis = { version = "0.27.5", features = [
     "aio",
 ], optional = true }
 dashmap = "6.1.0"
+surrealdb = { version = "2.3.5", optional = true, features = ["kv-mem"] }
+chrono = { version = "0.4.41", features = ["serde"]}
+url = { version = "2.5.4", optional = true } 
 derive_more = { version = "2.0.1", features = ["display"], optional = true }
 
 [dev-dependencies]
-chrono = { version = "0.4.39", features = ["serde"] }
+lazy_static = "1.5.0"
 env_logger = "0.11.5"
-lazy_static = "1.4"
 criterion = { version = "0.5", features = ["async_tokio"] }
+tokio-util = "0.7.15"
 
 [features]
 default = []
 redis = ["dep:bb8-redis", "dep:redis"]
 rabbitmq = ["dep:lapin", "dep:deadpool", "dep:deadpool-lapin"]
+surrealdb = ["dep:surrealdb", "dep:url"]
 test-fairness = []
 
 # Allows for access to the management API for the queue.
@@ -52,6 +56,10 @@ harness = false
 
 [[bench]]
 name = "redis_benchmark"
+harness = false
+
+[[bench]]
+name = "surrealdb_benchmark"
 harness = false
 
 # Add this section for docs.rs

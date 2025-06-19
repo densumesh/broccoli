@@ -47,6 +47,32 @@ pub trait Broker: Send + Sync {
         options: Option<ConsumeOptions>,
     ) -> Result<Option<InternalBrokerMessage>, BroccoliError>;
 
+    /// Attempts to consume up to a number of messages from the specified queue.
+    /// Does not block if not enough messages are available, and returns immmediately.
+    ///
+    /// # Arguments
+    /// * `queue_name` - The name of the queue.
+    ///
+    /// # Returns
+    /// A `Result` containing an `Some(String)` with the message if available or `None`
+    /// if no message is avaiable, and a `BroccoliError` on failure.
+    async fn try_consume_batch(
+        &self,
+        queue_name: &str,
+        batch_size: usize,
+        options: Option<ConsumeOptions>,
+    ) -> Result<Vec<InternalBrokerMessage>, BroccoliError> {
+        let mut messages = Vec::with_capacity(batch_size);
+        let mut i = 0;
+        while i < batch_size && messages.len() < batch_size {
+            if let Ok(Some(msg)) = self.try_consume(queue_name, options.clone()).await {
+                messages.push(msg);
+            }
+            i += 1;
+        }
+        Ok(messages)
+    }
+
     /// Consumes a message from the specified queue, blocking until a message is available.
     ///
     /// # Arguments
@@ -100,6 +126,7 @@ pub trait Broker: Send + Sync {
 }
 
 /// Configuration options for broker behavior.
+#[derive(Debug, Clone)]
 pub struct BrokerConfig {
     /// Maximum number of retry attempts for failed messages
     pub retry_attempts: Option<u8>,
@@ -112,6 +139,10 @@ pub struct BrokerConfig {
     /// NOTE: If you enable this w/ rabbitmq, you will need to install the delayed-exchange plugin
     /// <https://www.rabbitmq.com/blog/2015/04/16/scheduling-messages-with-rabbitmq>
     pub enable_scheduling: Option<bool>,
+    #[cfg(feature = "surrealdb")]
+    /// Existing surrealdb database connection to be reused
+    /// (Surrealdb only)
+    pub surrealdb_connection: Option<surrealdb::Surreal<surrealdb::engine::any::Any>>,
 }
 
 impl Default for BrokerConfig {
@@ -121,6 +152,8 @@ impl Default for BrokerConfig {
             retry_failed: Some(true),
             pool_connections: Some(10),
             enable_scheduling: Some(false),
+            #[cfg(feature = "surrealdb")]
+            surrealdb_connection: None,
         }
     }
 }
@@ -253,4 +286,7 @@ pub enum BrokerType {
     /// RabbitMQ-based message broker
     #[cfg(feature = "rabbitmq")]
     RabbitMQ,
+    /// SurrealDB-based message broker
+    #[cfg(feature = "surrealdb")]
+    SurrealDB,
 }
