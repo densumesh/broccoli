@@ -1,4 +1,3 @@
-use broccoli_queue::queue::ConsumeOptionsBuilder;
 #[cfg(all(feature = "redis", feature = "test-fairness"))]
 use broccoli_queue::queue::PublishOptions;
 #[cfg(all(feature = "redis", feature = "test-fairness"))]
@@ -7,6 +6,7 @@ use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 #[cfg(all(feature = "redis", feature = "test-fairness"))]
 use time::Duration;
+
 
 mod common;
 

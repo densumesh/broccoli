@@ -226,11 +226,16 @@ impl Broker for RedisBroker {
     ) -> Result<InternalBrokerMessage, BroccoliError> {
         self.ensure_pool()?;
         let mut message: Option<InternalBrokerMessage> = None;
+        let sleep = options
+            .clone()
+            .unwrap_or_default()
+            .consume_wait
+            .unwrap_or(std::time::Duration::from_millis(500));
 
         while message.is_none() {
             message = self.try_consume(queue_name, options.clone()).await?;
             if message.is_none() {
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                tokio::time::sleep(sleep).await;
             }
         }
 

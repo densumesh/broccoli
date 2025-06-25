@@ -12,6 +12,23 @@ pub enum BroccoliError {
     #[error("Broker error: {0}")]
     Broker(String),
 
+    /// Errors that occur during broker implementations related to concurrent operations not being idempotent
+    /// (Can only happen when doing multiple parallel `SurrealDB` reads)
+    ///
+    /// # Examples
+    /// - Multiple concurrent reads on the same topic
+    #[error("Broker error: non-idempotent operation {0}")]
+    BrokerNonIdempotentOp(String),
+
+    /// Errors that occur during broker implementations related to concurrent operations not being idempotent.
+    /// The operation can be retried.
+    /// (Can only happen when doing multiple `SurrealDB` operations on the same table )
+    ///
+    /// # Examples
+    /// - Multiple concurrent writes on the same table
+    #[error("Broker error: non-idempotent retriable operation {0}")]
+    BrokerNonIdempotentRetriableOp(String),
+
     /// Represents errors that occur during message publishing.
     ///
     /// # Examples
@@ -44,7 +61,7 @@ pub enum BroccoliError {
     #[error("Failed to reject message: {0}")]
     Reject(String),
 
-    /// Represents errors that occur during message cacnelling.
+    /// Represents errors that occur during message cancelling.
     ///
     /// # Examples
     /// - Failed to cancel message processing
@@ -71,6 +88,13 @@ pub enum BroccoliError {
     #[cfg(feature = "redis")]
     #[error("Redis error: {0}")]
     Redis(#[from] redis::RedisError),
+
+    /// Represents SurrealDB-specific errors.
+    ///
+    /// This variant wraps the underlying `SurrealDB` error.
+    #[cfg(feature = "surrealdb")]
+    #[error("SurrealDB error: {0}")]
+    SurrealDB(#[from] surrealdb::Error),
 
     /// Represents errors that occur during job processing.
     #[error("Job error: {0}")]
