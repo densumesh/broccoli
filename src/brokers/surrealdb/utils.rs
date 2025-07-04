@@ -26,6 +26,7 @@ struct SurrealDBConnectionConfig {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct InternalSurrealDBBrokerQueueIndex {
     pub queue_id: RecordId, // points to queue:[priority,timestamp,messageid]
+    pub timestamp: chrono::DateTime<chrono::Utc>,
 }
 
 impl Default for SurrealDBBroker {
@@ -285,10 +286,11 @@ pub async fn add_to_queue(
     queue_name: &str,
     task_id: &String,
     priority: i64,
+    ts: chrono::DateTime<chrono::Utc>,
     err_msg: &'static str,
 ) -> Result<(), BroccoliError> {
     let now = surrealdb::sql::Datetime::default(); // this is now()
-    self::add_to_queue_scheduled(db, queue_name, task_id, priority, now, err_msg).await
+    self::add_to_queue_scheduled(db, queue_name, task_id, priority, now, ts, err_msg).await
 }
 
 /// add to the end of the timeseries queue with a delay duration
@@ -298,6 +300,7 @@ pub async fn add_to_queue_delayed(
     task_id: &String,
     priority: i64,
     delay: Duration,
+    ts: chrono::DateTime<chrono::Utc>,
     err_msg: &'static str,
 ) -> Result<(), BroccoliError> {
     // this is a convoluted conversion as surrealdb::sql::Datetime does not support adding
@@ -309,7 +312,7 @@ pub async fn add_to_queue_delayed(
     let delay = chrono::TimeDelta::new(secs, ns).unwrap_or_default();
     let when = now.checked_add_signed(delay).unwrap_or(now);
     let when: surrealdb::sql::Datetime = when.into();
-    self::add_to_queue_scheduled(db, queue_name, task_id, priority, when, err_msg).await
+    self::add_to_queue_scheduled(db, queue_name, task_id, priority, when, ts, err_msg).await
 }
 
 /// add to the timeseries at a scheduled time, can be in the past and it will be triggered immediately
@@ -319,18 +322,22 @@ pub async fn add_to_queue_scheduled(
     task_id: &String,
     priority: i64,
     when: surrealdb::sql::Datetime,
+        ts: chrono::DateTime<chrono::Utc>,
     err_msg: &'static str,
 ) -> Result<(), BroccoliError> {
-    self::add_record_to_queue(db, queue_name, task_id, priority, when, err_msg).await
+    self::add_record_to_queue(db, queue_name, task_id, priority, when, ts, err_msg).await
 }
 
-// internal implementation to add the record to the timeseries queue
+// internal implementation to add the record to the timeseries queue + index
+// 1) we add the index first
+// 2) we add the queue entry last, as that is what consumers see
 async fn add_record_to_queue(
     db: &Surreal<Any>,
     queue_name: &str,
     task_id: &String,
     priority: i64,
     when: surrealdb::sql::Datetime,
+    ts: chrono::DateTime<chrono::Utc>,
     err_msg: &'static str,
 ) -> Result<(), BroccoliError> {
     let uuid = match surrealdb::sql::Uuid::from_str(task_id) {
@@ -338,28 +345,26 @@ async fn add_record_to_queue(
         Err(()) => Err(BroccoliError::Broker(format!("{} is not a uuid", &task_id))),
     }?;
     let queue_record_id = queue_record_id(queue_name, priority, when, *uuid);
+    let _ =  self::add_to_queue_index(db, queue_name, task_id, queue_record_id.clone(), ts, err_msg).await?;
+    
     let message_record_id = message_record_id(queue_name, task_id)?;
     let msg = InternalSurrealDBBrokerMessageEntry {
         id: queue_record_id.clone(),
         message_id: message_record_id.clone(),
         priority,
+        timestamp: ts,
     };
     let mut retryable = RetriableSurrealDBResult::new(format!("{err_msg}:'{queue_name}': adding to queue"));
     while !retryable.is_done() {
         let result: Result<Option<InternalSurrealDBBrokerMessageEntry>, surrealdb::Error> = db
-            .create(queue_record_id.clone())
+            .create(&queue_record_id)
             .content(msg.clone())
             .await;
         retryable = retryable.step(result).await;
     }
     let qm =retryable.wrapup()?;
     match qm {
-        Some(_) => {
-            // now we insert into the index and we are done, note we insert the queue id
-            let () =
-                self::add_to_queue_index(db, queue_name, task_id, queue_record_id, err_msg).await?;
-            Ok(())
-        }
+        Some(_) =>Ok(()),
         None => Err(BroccoliError::Broker(format!(
             "{err_msg}:'{queue_name}': adding to queue (silently did not add)",
         ))),
@@ -374,6 +379,7 @@ async fn add_to_queue_index(
     queue_name: &str,
     task_id: &str,
     queue_id: RecordId, // queue:[timestamp, task_id]
+    ts: chrono::DateTime<chrono::Utc>,
     err_msg: &'static str,
 ) -> Result<(), BroccoliError> {
     // we create the index record and add to the index
@@ -381,7 +387,7 @@ async fn add_to_queue_index(
     let index_record_id = index_record_id(task_id, queue_name)?;
     let qm: Option<InternalSurrealDBBrokerQueueIndex> = db
         .upsert(index_record_id)
-        .content(InternalSurrealDBBrokerQueueIndex { queue_id })
+        .content(InternalSurrealDBBrokerQueueIndex { queue_id, timestamp: ts })
         .await
         .map_err(|e: surrealdb::Error| {
             BroccoliError::Broker(format!("{err_msg}:'{queue_name}': {e}"))
@@ -510,7 +516,7 @@ pub(crate) async fn get_queued_transaction_impl(
                 LET $payloads = array::fold($msgs, {out_: [], t_: $processing_table}, |$acc, $e|  {
                     -- remove from queue and return payload
                     -- remember we don't delete from index, instead acknowledge/reject/cancel will do it
-                    LET $deleted = DELETE $e.id RETURN BEFORE;
+                    LET $deleted = DELETE ONLY $e.id RETURN BEFORE;
                     IF !$deleted {
                         -- if it was not deleted we will not abort the transaction, we just won't return the payload
                         RETURN $acc;
@@ -522,7 +528,8 @@ pub(crate) async fn get_queued_transaction_impl(
                             // we forcefully add it
                             id: type::record($acc.t_+':u\\''+<string>$e.id[2]+'\\''), // id[2] is the uuid
                             message_id: $e.message_id,
-                            priority: $e.priority
+                            priority: $e.priority,
+                            timestamp: time::now()
                         };
                     };
                     LET $payload = SELECT * FROM ONLY $e.message_id;
@@ -619,7 +626,8 @@ async fn remove_from_queue_add_to_processed_transaction_impl(
                 LET $c = CREATE type::table($processing_table) CONTENT {
                     id: $processing_id,                            
                     message_id: $message_id,
-                    priority: $priority
+                    priority: $priority,
+                    timestamp: time::now()
                 } RETURN AFTER;
                 IF !$c {
                     THROW 'Transaction failed adding to processing, '+<string>$processing_id;
@@ -627,7 +635,7 @@ async fn remove_from_queue_add_to_processed_transaction_impl(
                 -- if message is still in the queue, remove it and return payload
                 -- otherwise we explicitly abort the transaction
                 -- (remember we don't delete from index, instead acknowledge/reject/cancel will do it)
-                LET $m = DELETE $queued_message_id RETURN BEFORE;
+                LET $m = DELETE ONLY $queued_message_id RETURN BEFORE;
                 IF !$m {
                     THROW 'Transaction failed removing from queue, '+<string>$queued_message_id+' already deleted (CONCURRENT_READ)';
                 };
@@ -927,19 +935,20 @@ pub(crate) async fn remove_message_and_from_processing_transaction(
             LET $message_id = type::record($queue_name+':u\\''+$task_id+'\\'');
             LET $m = DELETE $message_id RETURN BEFORE;
             IF !$m {
-                THROW 'Transaction failed removing payload, '+<string>$message_id+ ' already deleted (CONCURRENT_READ)';
+                THROW 'Transaction failed removing payload '+<string>$message_id+ ' (CONCURRENT_READ)';
             };
+
             -- remove from index
             LET $index_id = type::thing($index_table, [<uuid>$task_id, $queue_name]);
             LET $idx = DELETE $index_id RETURN BEFORE;
             IF !$idx {
-                THROW 'Transaction failed removing index, '+<string>$index_id+' already deleted (CONCURRENT_READ)';
+                THROW 'Transaction failed removing index '+<string>$index_id+' (CONCURRENT_READ)';
             };
             -- remove from processing
             LET $processing_id = type::record($processing_table+':u\\''+$task_id+'\\'');
-            LET $p = DELETE $processing_id RETURN BEFORE;
+            LET $p = DELETE ONLY $processing_id RETURN BEFORE;
             IF !$p {
-                THROW 'Transaction failed removing from processing, '+<string>$processing_id+' already deleted (CONCURRENT_READ)';
+                THROW 'Transaction failed removing from processing '+<string>$processing_id+' (CONCURRENT_READ)';
             };
             $p
         };
@@ -1019,6 +1028,7 @@ pub async fn add_to_failed(
     let failed_record = InternalSurrealDBBrokerFailedMessage {
         id: None, // it will be added by serde
         original_msg: InternalSurrealDBBrokerMessage::from(queue_name, msg)?,
+        timestamp: chrono::Utc::now(),
     };
     let q = "CREATE type::thing($failed_table, $message_id) CONTENT $failed_record";
     let _ = db
