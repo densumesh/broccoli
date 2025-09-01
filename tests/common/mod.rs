@@ -36,3 +36,16 @@ pub async fn get_surrealdb_client() -> surrealdb::Surreal<surrealdb::engine::any
         .unwrap();
     db
 }
+
+#[cfg(all(feature = "surrealdb", test))]
+///
+pub async fn setup_queue_with(
+    sdb: surrealdb::Surreal<surrealdb::engine::any::Any>,
+) -> BroccoliQueue {
+    BroccoliQueue::builder_with(sdb)
+        .pool_connections(5)
+        .enable_scheduling(true)
+        .build()
+        .await
+        .expect("Queue setup failed. Are you sure Redis/RabbitMQ/SurrealDB is running?")
+}

@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 use time::Duration;
 use tokio::sync::Mutex;
 
+#[cfg(feature = "surrealdb")]
+use crate::common::get_surrealdb_client;
+
 mod common;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -21,10 +24,14 @@ struct TestMessage {
 #[tokio::test]
 async fn test_publish_and_consume() {
     //env_logger::init();
+    #[cfg(feature = "surrealdb")]
+    let sdb = get_surrealdb_client().await;
+
     let queue = common::setup_queue().await;
 
     #[cfg(feature = "redis")]
     let mut redis = common::get_redis_client().await;
+
     let test_topic = "test_publish_and_consume";
 
     // Test message
@@ -82,6 +89,26 @@ async fn test_publish_and_consume() {
 
         // After acknowledge, verify cleanup
         let exists: bool = redis.exists(published.task_id.to_string()).await.unwrap();
+        assert!(!exists, "Message should be cleaned up after acknowledge");
+    }
+
+    #[cfg(feature = "surrealdb")]
+    {
+        queue
+            .acknowledge(test_topic, consumed)
+            .await
+            .expect("Failed to acknowledge message");
+
+        let processing_table_name = format!("{test_topic}___processing");
+        let st = "(SELECT COUNT() FROM type::table($processing) WHERE message_id=$id).count==1";
+        let mut resp = sdb
+            .query(st)
+            .bind(("processing", processing_table_name))
+            .bind(("id", published.task_id))
+            .await
+            .unwrap();
+        let exists: Option<bool> = resp.take(0).unwrap();
+        let exists = exists.unwrap();
         assert!(!exists, "Message should be cleaned up after acknowledge");
     }
 }
@@ -383,7 +410,7 @@ async fn test_message_retry() {
 
     // Publish message
     #[cfg(not(feature = "test-fairness"))]
-    let published = queue
+    let _ = queue
         .publish(test_topic, None, &message, None)
         .await
         .expect("Failed to publish message");
@@ -875,6 +902,8 @@ async fn test_process_messages() {
         .await
         .expect("Could not publish");
     assert_eq!(10, published.len());
+    //panic!();
+
     let expected_count = 9 * 10 / 2; // 0 + 1 + ... + n = n(n+1)/2
     let wait = tokio::spawn(async move {
         let mut counter = 0;

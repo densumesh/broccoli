@@ -139,8 +139,8 @@ where
 async fn benchmark_raw_surrealdb_throughput(db: &Surreal<Any>, message_count: usize) -> (f64, f64) {
     let queue_name = "bench_raw_surrealdb";
 
-    let index_table = format!("{queue_name}___index");
     let queue_table = format!("{queue_name}___queue");
+    let index_table = format!("{queue_name}___index");
     let processing_table = format!("{queue_name}___processing");
 
     // Generate test messages
@@ -172,7 +172,7 @@ async fn benchmark_raw_surrealdb_throughput(db: &Surreal<Any>, message_count: us
         let _: Option<BenchmarkMessageIndex> = db
             .create((index_table.clone(), id))
             .content(BenchmarkMessageIndex {
-                queue_id: queue_record_id, // queue:[timestamp,id]
+                queue_id: queue_record_id, // queue:[5,timestamp,id]
             })
             .await
             .unwrap();
@@ -458,7 +458,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     for (db, broccoli_queue, instance) in instances {
         for &count in &message_counts {
             //TODO: mem raw test runs into transaction issues so skipping it
-            // if instance == "mem" {
+            // if instance != "mem" {
             // group.bench_function(
             //     format!(
             //         "Raw surrealdb publish loop + consume loop {} - {}",

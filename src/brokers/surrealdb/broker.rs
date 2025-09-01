@@ -67,7 +67,6 @@ impl Broker for SurrealDBBroker {
     /// # Returns
     /// A `Result` indicating success or failure.
     ///
-    ///
     async fn connect(&mut self, broker_url: &str) -> Result<(), BroccoliError> {
         // if the configuration contains a database connection, we prioritise that
         let db = match self.config.clone() {
