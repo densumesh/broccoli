@@ -790,7 +790,7 @@ dependencies = [
 
 [[package]]
 name = "broccoli_queue"
-version = "0.4.4"
+version = "0.4.5"
 dependencies = [
  "async-trait",
  "bb8-redis",

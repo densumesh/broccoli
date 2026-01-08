@@ -71,6 +71,7 @@ impl RedisBroker {
 
                 local popped_message = redis.call('ZPOPMIN', string.format("%s_%s_queue", KEYS[2], queue_to_process), 1)
                 if #popped_message == 0 then
+                redis.call('SREM', KEYS[3], queue_to_process)
                 return nil
                 end
 
