@@ -387,4 +387,52 @@ impl Broker for RedisBroker {
 
         Ok(())
     }
+
+    /// Returns the size of the queue(s).
+    ///
+    /// For fairness queues, returns a map with each disambiguator queue and its size.
+    /// For unfair queues, returns a map with just the main queue name and its size.
+    ///
+    /// # Arguments
+    /// * `queue_name` - The name of the queue.
+    ///
+    /// # Returns
+    /// A `Result` containing a `HashMap<String, u64>` mapping queue names to their sizes.
+    async fn size(&self, queue_name: &str) -> Result<std::collections::HashMap<String, u64>, BroccoliError> {
+        let mut redis_connection = self.get_redis_connection().await?;
+        let mut sizes = std::collections::HashMap::new();
+
+        let fairness_set_name = format!("{queue_name}_fairness_set");
+
+        // Check if fairness set exists and has members
+        let disambiguators: Vec<String> = redis_connection
+            .smembers(&fairness_set_name)
+            .await
+            .unwrap_or_default();
+
+        if disambiguators.is_empty() {
+            // Unfair queue - just check the main queue
+            let size: u64 = redis_connection
+                .zcard(queue_name)
+                .await
+                .map_err(|e| BroccoliError::Broker(format!("Failed to get queue size: {e:?}")))?;
+            sizes.insert(queue_name.to_string(), size);
+        } else {
+            // Fairness queue - check each disambiguator queue
+            for disambiguator in disambiguators {
+                let sub_queue_name = format!("{queue_name}_{disambiguator}_queue");
+                let size: u64 = redis_connection
+                    .zcard(&sub_queue_name)
+                    .await
+                    .map_err(|e| {
+                        BroccoliError::Broker(format!(
+                            "Failed to get queue size for {sub_queue_name}: {e:?}"
+                        ))
+                    })?;
+                sizes.insert(sub_queue_name, size);
+            }
+        }
+
+        Ok(sizes)
+    }
 }

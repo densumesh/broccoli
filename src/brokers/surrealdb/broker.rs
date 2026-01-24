@@ -489,4 +489,8 @@ impl Broker for SurrealDBBroker {
             ))),
         }
     }
+
+    async fn size(&self, _queue_name: &str) -> Result<std::collections::HashMap<String, u64>, BroccoliError> {
+        Err(BroccoliError::NotImplemented)
+    }
 }

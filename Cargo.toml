@@ -41,7 +41,7 @@ criterion = { version = "0.5", features = ["async_tokio"] }
 tokio-util = "0.7.15"
 
 [features]
-default = []
+default = ['redis']
 redis = ["dep:bb8-redis", "dep:redis"]
 rabbitmq = ["dep:lapin", "dep:deadpool", "dep:deadpool-lapin"]
 surrealdb = ["dep:surrealdb", "dep:url"]
