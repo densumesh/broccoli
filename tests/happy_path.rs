@@ -808,6 +808,113 @@ async fn test_message_priority() {
     }
 }
 
+#[cfg(feature = "redis")]
+#[tokio::test]
+async fn test_queue_size() {
+    let queue = common::setup_queue().await;
+    let test_topic = "test_queue_size_topic";
+
+    // Test messages
+    let messages: Vec<TestMessage> = (0..5)
+        .map(|i| TestMessage {
+            id: i.to_string(),
+            content: format!("content {i}"),
+        })
+        .collect();
+
+    #[cfg(not(feature = "test-fairness"))]
+    {
+        // Publish messages to unfair queue
+        queue
+            .publish_batch(test_topic, None, messages.clone(), None)
+            .await
+            .expect("Failed to publish batch");
+
+        // Check queue size
+        let sizes = queue
+            .size(test_topic)
+            .await
+            .expect("Failed to get queue size");
+
+        assert_eq!(sizes.len(), 1, "Should have exactly one queue");
+        assert_eq!(
+            sizes.get(test_topic),
+            Some(&5),
+            "Queue should have 5 messages"
+        );
+
+        // Consume some messages and check size again
+        let consume_options = ConsumeOptions::default();
+        for _ in 0..2 {
+            let msg = queue
+                .consume::<TestMessage>(test_topic, Some(consume_options.clone()))
+                .await
+                .expect("Failed to consume");
+            queue
+                .acknowledge(test_topic, msg)
+                .await
+                .expect("Failed to ack");
+        }
+
+        let sizes = queue
+            .size(test_topic)
+            .await
+            .expect("Failed to get queue size");
+
+        assert_eq!(
+            sizes.get(test_topic),
+            Some(&3),
+            "Queue should have 3 messages after consuming 2"
+        );
+    }
+
+    #[cfg(feature = "test-fairness")]
+    {
+        // Publish messages to multiple fairness queues
+        queue
+            .publish_batch(
+                test_topic,
+                Some(String::from("queue-1")),
+                messages.clone(),
+                None,
+            )
+            .await
+            .expect("Failed to publish batch to job-1");
+
+        queue
+            .publish_batch(
+                test_topic,
+                Some(String::from("queue-2")),
+                messages[0..3].to_vec(),
+                None,
+            )
+            .await
+            .expect("Failed to publish batch to job-2");
+
+        // Check queue sizes
+        let sizes = queue
+            .size(test_topic)
+            .await
+            .expect("Failed to get queue size");
+
+        assert_eq!(sizes.len(), 2, "Should have two fairness queues");
+
+        let job1_queue = format!("{}_queue-1_queue", test_topic);
+        let job2_queue = format!("{}_queue-2_queue", test_topic);
+
+        assert_eq!(
+            sizes.get(&job1_queue),
+            Some(&5),
+            "queue-1 queue should have 5 messages"
+        );
+        assert_eq!(
+            sizes.get(&job2_queue),
+            Some(&3),
+            "queue-2 queue should have 3 messages"
+        );
+    }
+}
+
 lazy_static::lazy_static! {
     // warning: do not share these variables across tests in the same run
     static ref processed: Arc<tokio::sync::Mutex<usize>> = Arc::new(Mutex::new(0));

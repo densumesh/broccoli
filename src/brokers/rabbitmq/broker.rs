@@ -376,4 +376,8 @@ impl Broker for RabbitMQBroker {
     async fn cancel(&self, _queue_name: &str, _message_id: String) -> Result<(), BroccoliError> {
         Err(BroccoliError::NotImplemented)
     }
+
+    async fn size(&self, _queue_name: &str) -> Result<std::collections::HashMap<String, u64>, BroccoliError> {
+        Err(BroccoliError::NotImplemented)
+    }
 }

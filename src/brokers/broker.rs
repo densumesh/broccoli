@@ -124,6 +124,18 @@ pub trait Broker: Send + Sync {
     /// # Returns
     /// A `Result` indicating success or failure.
     async fn cancel(&self, queue_name: &str, message_id: String) -> Result<(), BroccoliError>;
+
+    /// Returns the size of the queue(s).
+    ///
+    /// For fairness queues, returns a map with each disambiguator queue and its size.
+    /// For unfair queues, returns a map with just the main queue name and its size.
+    ///
+    /// # Arguments
+    /// * `queue_name` - The name of the queue.
+    ///
+    /// # Returns
+    /// A `Result` containing a `HashMap<String, u64>` mapping queue names to their sizes.
+    async fn size(&self, queue_name: &str) -> Result<HashMap<String, u64>, BroccoliError>;
 }
 
 /// Configuration options for broker behavior.

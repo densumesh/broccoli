@@ -1060,6 +1060,29 @@ impl BroccoliQueue {
         }
     }
 
+    /// Returns the size of the queue(s).
+    ///
+    /// For fairness queues, returns a map with each disambiguator queue and its size.
+    /// For unfair queues, returns a map with just the main queue name and its size.
+    ///
+    /// # Arguments
+    /// * `queue_name` - The name of the queue.
+    ///
+    /// # Returns
+    /// A `Result` containing a `HashMap<String, u64>` mapping queue names to their sizes.
+    ///
+    /// # Errors
+    /// If the queue size fails to be retrieved, a `BroccoliError` will be returned.
+    pub async fn size(
+        &self,
+        queue_name: &str,
+    ) -> Result<std::collections::HashMap<String, u64>, BroccoliError> {
+        self.broker
+            .size(queue_name)
+            .await
+            .map_err(|e| BroccoliError::Broker(format!("Failed to get queue size: {e:?}")))
+    }
+
     /// Retrieves the status of the specified queue.
     ///
     /// # Arguments
